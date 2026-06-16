@@ -1,0 +1,35 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.ipynb_checkpoints/
+
+# experiment outputs
+experiments/logs/*
+experiments/results/*
+!experiments/logs/.gitkeep
+!experiments/results/.gitkeep
+
+# large instance data
+instances/*.jsonl
+instances/*.npz
+!instances/.gitkeep
+
+# julia
+julia/*.cov
+*.jl.cov
+*.jl.*.cov
+
+# os
+.DS_Store
+
+# secrets
+.env
+*.api_key
+ibm_token*
+iqm_token*
