@@ -10,14 +10,21 @@ import numpy as np
 import typer
 
 from eon.formulations.layer_b import (
+    LayerBSurrogate,
     build_layer_b_surrogate,
     solve_layer_b_surrogate,
     validate_layer_b_surrogate,
 )
-from eon.formulations.lindistflow import ExpansionProblemConfig, solve_lindistflow_expansion
-from eon.instances.candidate_lines import generate_candidate_lines
+from eon.formulations.lindistflow import (
+    ExpansionProblemConfig,
+    ExpansionResult,
+    solve_lindistflow_expansion,
+)
+from eon.formulations.qubo import compile_layer_b_qubo_hess
+from eon.instances.candidate_lines import CandidateLine, generate_candidate_lines
 from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.scenarios import Scenario, build_scenario_set
+from eon.instances.treewidth import coupling_diagnostics
 from eon.mps.protocol import run_mps_protocol
 from eon.validation import validate_finite_array
 
@@ -102,40 +109,10 @@ def classify_default_instance_zoo(
         n_scenarios_aggregated=3,
     )
     scenarios = build_scenario_set(scenario_kind)
-    feeder_schedule = (
-        (
-            "ieee123",
-            candidate_count,
-            neighborhood_size,
-            (
-                ("adversarial_long_range", 10),
-                ("community_bridging", 6),
-                ("useful_adversarial", 2),
-                ("distance_weighted", 2),
-            ),
-        ),
-        (
-            "ieee123",
-            large_candidate_count,
-            large_candidate_count,
-            (
-                ("adversarial_long_range", 4),
-                ("community_bridging", 2),
-                ("useful_adversarial", 1),
-            ),
-        ),
-        (
-            "ieee33",
-            min(candidate_count, 20),
-            min(neighborhood_size, 20),
-            (
-                ("adversarial_long_range", 1),
-                ("community_bridging", 1),
-                ("useful_adversarial", 1),
-                ("distance_weighted", 1),
-                ("random_uniform", 1),
-            ),
-        ),
+    feeder_schedule = default_feeder_schedule(
+        candidate_count=candidate_count,
+        neighborhood_size=neighborhood_size,
+        large_candidate_count=large_candidate_count,
     )
 
     for (
@@ -152,29 +129,28 @@ def classify_default_instance_zoo(
         for family, repeat_count in family_schedule:
             for repeat_index in range(repeat_count):
                 seed = 7 + 17 * repeat_index
-                candidates = generate_candidate_lines(
-                    net,
-                    family,
-                    feeder_candidate_count,
-                    seed=seed,
-                    cost_per_km=cost_per_km,
-                    stress_info=baseline_stress if family == "useful_adversarial" else None,
-                )
                 instance_id = (
                     f"{feeder}:{family}:seed{seed}:n{feeder_candidate_count}:"
                     f"k{max_new_lines}:rep{repeat_index}"
                 )
                 try:
-                    layer_a = solve_lindistflow_expansion(net, scenarios, candidates, config)
-                    surrogate = build_layer_b_surrogate(
+                    candidates, layer_a, surrogate = build_instance_surrogate(
                         net,
                         scenarios,
-                        candidates,
-                        layer_a,
                         config,
-                        neighborhood_size=min(feeder_neighborhood_size, len(candidates)),
-                        evaluation_time_limit_s=max(3.0, time_limit / 3.0),
-                        pair_sample_limit=min(250, feeder_neighborhood_size * 6),
+                        family=family,
+                        candidate_count=feeder_candidate_count,
+                        neighborhood_size=feeder_neighborhood_size,
+                        seed=seed,
+                        time_limit=time_limit,
+                        cost_per_km=cost_per_km,
+                        baseline_stress=baseline_stress,
+                    )
+                    # Tree-width is the leading hardness indicator: MPS contraction
+                    # cost is exp(tree-width), so low structural tree-width is
+                    # provably MPS-easy. See PLAN.txt D13 / reading.txt R30.
+                    coupling = coupling_diagnostics(
+                        surrogate, compile_layer_b_qubo_hess(surrogate)
                     )
                     validation = validate_layer_b_surrogate(
                         net,
@@ -319,6 +295,21 @@ def classify_default_instance_zoo(
                             "feasible_plan_count": validation.feasible_plan_count,
                             "evaluated_plan_count": validation.evaluated_plan_count,
                         },
+                        "coupling": {
+                            "structural_treewidth": coupling.structural_treewidth,
+                            "structural_edges": coupling.structural_edges,
+                            "structural_density": coupling.structural_density,
+                            "structural_max_degree": coupling.structural_max_degree,
+                            "structural_components": coupling.structural_components,
+                            "linear_scale": coupling.linear_scale,
+                            "coupling_scale": coupling.coupling_scale,
+                            "coupling_field_ratio": coupling.coupling_field_ratio,
+                            "effective_treewidth": coupling.effective_treewidth,
+                            "effective_edges": coupling.effective_edges,
+                            "compiled_treewidth": coupling.compiled_treewidth,
+                            "compiled_edges": coupling.compiled_edges,
+                            "mps_easy_by_treewidth": coupling.mps_easy,
+                        },
                         "mps_results": {
                             "backend": mps.backend,
                             "chi_max_reached": mps.chi_max_reached,
@@ -365,6 +356,9 @@ def classify_default_instance_zoo(
                             }
                         ),
                         "classification": {
+                            "mps_easy_by_treewidth": coupling.mps_easy,
+                            "structural_treewidth": coupling.structural_treewidth,
+                            "effective_treewidth": coupling.effective_treewidth,
                             "layer_a_nontrivial": (
                                 layer_a.aggregate_metrics["weighted_voltage_violation_pu"] > 0.0
                                 or layer_a.aggregate_metrics["weighted_congestion_mw"] > 0.0
@@ -379,6 +373,89 @@ def classify_default_instance_zoo(
                     }
                 )
     return records
+
+
+def default_feeder_schedule(
+    *,
+    candidate_count: int,
+    neighborhood_size: int,
+    large_candidate_count: int,
+) -> tuple[tuple[str, int, int, tuple[tuple[str, int], ...]], ...]:
+    """The (feeder, candidate_count, neighborhood_size, family_schedule) zoo
+    schedule. Shared by the classifier and the tree-width re-score so both
+    rebuild the exact same instances."""
+    return (
+        (
+            "ieee123",
+            candidate_count,
+            neighborhood_size,
+            (
+                ("adversarial_long_range", 10),
+                ("community_bridging", 6),
+                ("useful_adversarial", 2),
+                ("distance_weighted", 2),
+            ),
+        ),
+        (
+            "ieee123",
+            large_candidate_count,
+            large_candidate_count,
+            (
+                ("adversarial_long_range", 4),
+                ("community_bridging", 2),
+                ("useful_adversarial", 1),
+            ),
+        ),
+        (
+            "ieee33",
+            min(candidate_count, 20),
+            min(neighborhood_size, 20),
+            (
+                ("adversarial_long_range", 1),
+                ("community_bridging", 1),
+                ("useful_adversarial", 1),
+                ("distance_weighted", 1),
+                ("random_uniform", 1),
+            ),
+        ),
+    )
+
+
+def build_instance_surrogate(
+    net: object,
+    scenarios: list[Scenario],
+    config: ExpansionProblemConfig,
+    *,
+    family: str,
+    candidate_count: int,
+    neighborhood_size: int,
+    seed: int,
+    time_limit: float,
+    cost_per_km: float,
+    baseline_stress: dict[int, float],
+) -> tuple[list[CandidateLine], ExpansionResult, LayerBSurrogate]:
+    """Build one zoo instance up to its Layer B surrogate (no MPS / validation).
+    The single source of truth for instance construction."""
+    candidates = generate_candidate_lines(
+        net,
+        family,
+        candidate_count,
+        seed=seed,
+        cost_per_km=cost_per_km,
+        stress_info=baseline_stress if family == "useful_adversarial" else None,
+    )
+    layer_a = solve_lindistflow_expansion(net, scenarios, candidates, config)
+    surrogate = build_layer_b_surrogate(
+        net,
+        scenarios,
+        candidates,
+        layer_a,
+        config,
+        neighborhood_size=min(neighborhood_size, len(candidates)),
+        evaluation_time_limit_s=max(3.0, time_limit / 3.0),
+        pair_sample_limit=min(250, neighborhood_size * 6),
+    )
+    return candidates, layer_a, surrogate
 
 
 def _chi_plateau_across_orderings(
