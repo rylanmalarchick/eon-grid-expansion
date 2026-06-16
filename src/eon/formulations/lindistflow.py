@@ -29,6 +29,15 @@ class ExpansionProblemConfig:
     mip_gap: float = 0.01
     flow_big_m_mva: float = 25.0
     voltage_big_m_pu: float = 0.35
+    # Voltage-variable band slack under reconfiguration (deep radial sags are
+    # penalized, not bound-infeasible). Only used when enable_reconfiguration.
+    reconfiguration_voltage_slack_pu: float = 2.0
+    # D13: joint expansion + reconfiguration. When True, every line carries a
+    # closed/open switch, the operated network is constrained radial (single-
+    # commodity-flow), and a line transmits power only if closed. This forces
+    # candidate builds to COMPETE for inclusion in the spanning tree -- the
+    # mechanism that makes the Layer B couplings load-bearing (raises J/h).
+    enable_reconfiguration: bool = False
     weights: ObjectiveWeights = ObjectiveWeights()
 
 
@@ -139,13 +148,37 @@ def solve_lindistflow_expansion(
         incident[line.from_bus].append(line)
         incident[line.to_bus].append(line)
 
+    closed_vars: dict[str, gp.Var] = {}
+    if cfg.enable_reconfiguration:
+        closed_vars = _add_reconfiguration(model, all_lines, buses, slack_bus, build_vars)
+
+    # Under reconfiguration the operated network is a single radial tree, so
+    # voltage drops are larger and must be PENALIZED (via v_low/v_high), not
+    # bound-infeasible -- otherwise a stressed radial config has no feasible
+    # point. Widen the voltage-variable band accordingly. Non-reconfiguration
+    # behaviour is unchanged (vband == voltage_big_m_pu).
+    vband = (
+        cfg.reconfiguration_voltage_slack_pu
+        if cfg.enable_reconfiguration
+        else cfg.voltage_big_m_pu
+    )
+    # Big-M that fully relaxes a branch's LinDistFlow voltage coupling when the
+    # branch is de-energized: must exceed the largest representable |v_to -
+    # v_from| (the full voltage band), or an OPEN branch wrongly forces its
+    # endpoints' voltages together. The original voltage_big_m_pu was too small.
+    vdrop_relax_pu = (
+        (cfg.voltage_max_pu + vband) - (cfg.voltage_min_pu - vband)
+        if cfg.enable_reconfiguration
+        else cfg.voltage_big_m_pu
+    )
+
     for scenario in scenarios:
         import_p[scenario.name] = model.addVar(lb=0.0, name=f"grid_import[{scenario.name}]")
         import_q[scenario.name] = model.addVar(lb=0.0, name=f"grid_import_q[{scenario.name}]")
         for bus in buses:
             v_bus[(scenario.name, bus)] = model.addVar(
-                lb=cfg.voltage_min_pu - cfg.voltage_big_m_pu,
-                ub=cfg.voltage_max_pu + cfg.voltage_big_m_pu,
+                lb=cfg.voltage_min_pu - vband,
+                ub=cfg.voltage_max_pu + vband,
                 name=f"v[{scenario.name},{bus}]",
             )
             v_low[(scenario.name, bus)] = model.addVar(lb=0.0, name=f"v_low[{scenario.name},{bus}]")
@@ -187,7 +220,29 @@ def solve_lindistflow_expansion(
             p_abs[key] = model.addVar(lb=0.0, name=f"p_abs[{scenario.name},{line.name}]")
             q_abs[key] = model.addVar(lb=0.0, name=f"q_abs[{scenario.name},{line.name}]")
             overload[key] = model.addVar(lb=0.0, name=f"overload[{scenario.name},{line.name}]")
-            z = 1.0 if not line.is_candidate else build_vars[line.name]
+            z: Any
+            if cfg.enable_reconfiguration:
+                # Open branches carry no power: gate flow hard to zero when the
+                # switch is open, so radiality actually constrains the power flow.
+                z = closed_vars[line.name]
+                model.addConstr(
+                    p_flow[key] <= cfg.flow_big_m_mva * z,
+                    name=f"p_gate_hi[{scenario.name},{line.name}]",
+                )
+                model.addConstr(
+                    p_flow[key] >= -cfg.flow_big_m_mva * z,
+                    name=f"p_gate_lo[{scenario.name},{line.name}]",
+                )
+                model.addConstr(
+                    q_flow[key] <= cfg.flow_big_m_mva * z,
+                    name=f"q_gate_hi[{scenario.name},{line.name}]",
+                )
+                model.addConstr(
+                    q_flow[key] >= -cfg.flow_big_m_mva * z,
+                    name=f"q_gate_lo[{scenario.name},{line.name}]",
+                )
+            else:
+                z = 1.0 if not line.is_candidate else build_vars[line.name]
             cap = min(cap, cfg.flow_big_m_mva)
             model.addConstr(
                 p_abs[key] >= p_flow[key],
@@ -222,11 +277,11 @@ def solve_lindistflow_expansion(
             )
             flow_drop = 2.0 * (line.r_pu * p_flow[key] + line.x_pu * q_flow[key])
             model.addConstr(
-                voltage_drop + flow_drop <= cfg.voltage_big_m_pu * (1.0 - z),
+                voltage_drop + flow_drop <= vdrop_relax_pu * (1.0 - z),
                 name=f"vdrop_upper[{scenario.name},{line.name}]",
             )
             model.addConstr(
-                voltage_drop + flow_drop >= -cfg.voltage_big_m_pu * (1.0 - z),
+                voltage_drop + flow_drop >= -vdrop_relax_pu * (1.0 - z),
                 name=f"vdrop_lower[{scenario.name},{line.name}]",
             )
 
@@ -297,6 +352,17 @@ def solve_lindistflow_expansion(
     selected_candidates = tuple(
         sorted(name for name, value in build_decisions.items() if value >= 0.5)
     )
+    closed_lines = (
+        tuple(
+            sorted(
+                name
+                for name, var in closed_vars.items()
+                if optimization.variable_values.get(var.VarName, 0.0) >= 0.5
+            )
+        )
+        if cfg.enable_reconfiguration and optimization.has_solution
+        else ()
+    )
 
     scenario_metrics: list[ScenarioMetrics] = []
     bus_voltage_pu: dict[str, dict[int, float]] = {}
@@ -358,6 +424,9 @@ def solve_lindistflow_expansion(
             "candidate_count": len(candidate_specs),
             "slack_bus": slack_bus,
             "solver_backend": optimization.backend,
+            "reconfiguration": cfg.enable_reconfiguration,
+            "closed_line_count": len(closed_lines),
+            "closed_lines": list(closed_lines),
         },
     )
 
@@ -409,6 +478,49 @@ def _existing_line_specs(
             )
         )
     return line_specs
+
+
+def _add_reconfiguration(
+    model: gp.Model,
+    all_lines: list[_LineSpec],
+    buses: list[int],
+    slack_bus: int,
+    build_vars: dict[str, gp.Var],
+) -> dict[str, gp.Var]:
+    """Add switch (closed/open) binaries and single-commodity-flow radiality.
+
+    The operated network is forced to be a spanning tree: exactly n_buses - 1
+    closed branches, plus a single-commodity flow that certifies every bus is
+    connected to the substation through closed branches. Count + connectivity
+    => radial (Jabr 2013; Lavorato et al. 2012). A candidate may be closed only
+    if it is built, so build decisions compete for inclusion in the tree.
+    """
+    n_buses = len(buses)
+    closed_vars: dict[str, gp.Var] = {}
+    for line in all_lines:
+        closed_vars[line.name] = model.addVar(vtype=GRB.BINARY, name=f"closed[{line.name}]")
+        if line.is_candidate:
+            model.addConstr(
+                closed_vars[line.name] <= build_vars[line.name],
+                name=f"closed_le_build[{line.name}]",
+            )
+    model.addConstr(
+        gp.quicksum(closed_vars.values()) == n_buses - 1,
+        name="radiality_count",
+    )
+
+    big_m = float(n_buses - 1)
+    net_inflow: dict[int, list[Any]] = {bus: [] for bus in buses}
+    for line in all_lines:
+        flow = model.addVar(lb=-big_m, ub=big_m, name=f"scf[{line.name}]")
+        model.addConstr(flow <= big_m * closed_vars[line.name], name=f"scf_ub[{line.name}]")
+        model.addConstr(flow >= -big_m * closed_vars[line.name], name=f"scf_lb[{line.name}]")
+        net_inflow[line.to_bus].append(flow)
+        net_inflow[line.from_bus].append(-flow)
+    for bus in buses:
+        demand = -big_m if bus == slack_bus else 1.0
+        model.addConstr(gp.quicksum(net_inflow[bus]) == demand, name=f"scf_balance[{bus}]")
+    return closed_vars
 
 
 def _candidate_to_spec(
