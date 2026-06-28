@@ -46,9 +46,10 @@ _MIN_ORDERINGS_FOR_PLATEAU = 3
 # NISQ-runnable qubit ceiling (the brief's "runnable on current NISQ hardware";
 # IQM Garnet is 20q via Braket, Emerald 54q -- PLAN.txt section 1).
 _NISQ_QUBIT_LIMIT = 30
-# Layer A MIP gap above which (or any non-OPTIMAL status) the joint expansion+
-# reconfiguration MILP counts as combinatorially hard -- where the hardness lives.
-_LAYER_A_HARD_GAP_THRESHOLD = 0.01
+# A TIME_LIMIT Layer A solve whose MIP gap exceeds this counts as combinatorially
+# hard -- where the hardness lives. Set well above the solver's own 1% target so it
+# means "substantially open", not "almost solved" (the 2026-06-28 sweep saw 15-86%).
+_LAYER_A_HARD_GAP_THRESHOLD = 0.05
 
 
 def _finite_or_none(value: float) -> float | None:
@@ -64,30 +65,28 @@ def _classify_instance(
     layer_a_hard: bool,
     nisq_runnable: bool,
     layer_b_validated: bool,
-    layer_b_mip_gap: float | None,
+    layer_b_gap_open: bool,
 ) -> str:
-    """Scale-split hardness verdict (Wave 5). The combinatorial hardness lives at
-    Layer A; the reduced n=20 QUBO is the NISQ-runnable piece.
+    """Return the scale-split hardness verdict for one instance.
 
-    - "hard": the full hardness-scale gate -- the strong exact-TN control fails
-      (tree_negative) AND Gurobi cannot close the reduced QUBO. Reachable only at
-      large scale; the n=20 zoo cannot meet it (the 2026-06-28 sweep showed the
-      reduced QUBO is Gurobi-easy and exact-TN-tractable).
-    - "nisq_path_a_candidate": a combinatorially-hard Layer A parent whose
-      MPS-negative reduced QUBO is NISQ-runnable (brief outcomes 2 + 4); Gurobi-easy
-      at this scale is expected.
-    - "easy" / "ambiguous": neither / partial.
+    "hard": MPS-negative AND the strong exact-TN control fails (tree_negative) AND
+    Layer B validates AND Gurobi cannot close the reduced QUBO (layer_b_gap_open).
+    "nisq_path_a_candidate": a combinatorially-hard Layer A parent (layer_a_hard)
+    whose MPS-negative, exact-TN-tractable (not tree_negative) reduced QUBO is
+    NISQ-runnable and validates. "easy": neither MPS- nor tree-negative.
+    "ambiguous": anything else.
     """
-    if (
-        mps_negative
-        and tree_negative
-        and layer_b_validated
-        and (layer_b_mip_gap or 0.0) > _HARD_MIP_GAP_THRESHOLD
-    ):
+    if mps_negative and tree_negative and layer_b_validated and layer_b_gap_open:
         return "hard"
-    if layer_a_hard and mps_negative and nisq_runnable and layer_b_validated:
+    if (
+        layer_a_hard
+        and mps_negative
+        and not tree_negative
+        and nisq_runnable
+        and layer_b_validated
+    ):
         return "nisq_path_a_candidate"
-    if not mps_negative and not tree_negative and not layer_a_hard:
+    if not mps_negative and not tree_negative:
         return "easy"
     return "ambiguous"
 
@@ -289,9 +288,12 @@ def classify_default_instance_zoo(
                     # (within_budget), so tree_negative is a LARGE-instance property.
                     # Score the two scales separately instead of demanding both on one
                     # instance, which is unsatisfiable at NISQ size.
+                    # Combinatorial hardness: Gurobi hit the time budget (TIME_LIMIT)
+                    # with a substantially-open gap. INFEASIBLE / INTERRUPTED / numeric
+                    # statuses are degenerate, not hard, and are excluded.
                     layer_a_hard = (
-                        layer_a.termination_status != "OPTIMAL"
-                        or (layer_a.mip_gap or 0.0) > _LAYER_A_HARD_GAP_THRESHOLD
+                        layer_a.termination_status == "TIME_LIMIT"
+                        and (layer_a.mip_gap or 0.0) > _LAYER_A_HARD_GAP_THRESHOLD
                     )
                     nisq_runnable = coupling.variable_count <= _NISQ_QUBIT_LIMIT
                     final_classification = _classify_instance(
@@ -300,7 +302,7 @@ def classify_default_instance_zoo(
                         layer_a_hard=layer_a_hard,
                         nisq_runnable=nisq_runnable,
                         layer_b_validated=layer_b_validated,
-                        layer_b_mip_gap=layer_b.mip_gap,
+                        layer_b_gap_open=(layer_b.mip_gap or 0.0) > _HARD_MIP_GAP_THRESHOLD,
                     )
                     validate_finite_array(
                         np.asarray(list(layer_a.aggregate_metrics.values()), dtype=float),
@@ -450,10 +452,7 @@ def classify_default_instance_zoo(
                             "mps_negative_candidate": mps_negative,
                             "tree_tn_negative_candidate": tree_negative,
                             "layer_a_hard": layer_a_hard,
-                            "layer_a_status": layer_a.termination_status,
-                            "layer_a_mip_gap": layer_a.mip_gap,
                             "nisq_runnable": nisq_runnable,
-                            "variable_count": coupling.variable_count,
                             "final_classification": final_classification,
                         },
                     }
