@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -42,12 +43,53 @@ _FEASIBILITY_VIOLATION_THRESHOLD = 0.1
 _HARD_MIP_GAP_THRESHOLD = 0.01
 # min ordering results before a chi plateau is meaningful:
 _MIN_ORDERINGS_FOR_PLATEAU = 3
+# NISQ-runnable qubit ceiling (the brief's "runnable on current NISQ hardware";
+# IQM Garnet is 20q via Braket, Emerald 54q -- PLAN.txt section 1).
+_NISQ_QUBIT_LIMIT = 30
+# Layer A MIP gap above which (or any non-OPTIMAL status) the joint expansion+
+# reconfiguration MILP counts as combinatorially hard -- where the hardness lives.
+_LAYER_A_HARD_GAP_THRESHOLD = 0.01
 
 
 def _finite_or_none(value: float) -> float | None:
     """JSON has no Infinity/NaN: a non-finite tree-control energy (an over-budget
     instance that was not contracted) serializes as null, not an invalid token."""
     return value if math.isfinite(value) else None
+
+
+def _classify_instance(
+    *,
+    mps_negative: bool,
+    tree_negative: bool,
+    layer_a_hard: bool,
+    nisq_runnable: bool,
+    layer_b_validated: bool,
+    layer_b_mip_gap: float | None,
+) -> str:
+    """Scale-split hardness verdict (Wave 5). The combinatorial hardness lives at
+    Layer A; the reduced n=20 QUBO is the NISQ-runnable piece.
+
+    - "hard": the full hardness-scale gate -- the strong exact-TN control fails
+      (tree_negative) AND Gurobi cannot close the reduced QUBO. Reachable only at
+      large scale; the n=20 zoo cannot meet it (the 2026-06-28 sweep showed the
+      reduced QUBO is Gurobi-easy and exact-TN-tractable).
+    - "nisq_path_a_candidate": a combinatorially-hard Layer A parent whose
+      MPS-negative reduced QUBO is NISQ-runnable (brief outcomes 2 + 4); Gurobi-easy
+      at this scale is expected.
+    - "easy" / "ambiguous": neither / partial.
+    """
+    if (
+        mps_negative
+        and tree_negative
+        and layer_b_validated
+        and (layer_b_mip_gap or 0.0) > _HARD_MIP_GAP_THRESHOLD
+    ):
+        return "hard"
+    if layer_a_hard and mps_negative and nisq_runnable and layer_b_validated:
+        return "nisq_path_a_candidate"
+    if not mps_negative and not tree_negative and not layer_a_hard:
+        return "easy"
+    return "ambiguous"
 
 
 @app.command()
@@ -80,6 +122,10 @@ def main(
         int,
         typer.Option(help="Candidate count for the explicit large-instance IEEE 123 pass."),
     ] = 50,
+    enable_reconfiguration: Annotated[
+        bool,
+        typer.Option(help="Build with joint expansion+reconfiguration (the Path-A zoo)."),
+    ] = False,
 ) -> None:
     records = classify_default_instance_zoo(
         candidate_count=candidate_count,
@@ -88,6 +134,7 @@ def main(
         time_limit=time_limit,
         scenario_kind=scenario_kind,
         large_candidate_count=large_candidate_count,
+        enable_reconfiguration=enable_reconfiguration,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
@@ -105,12 +152,14 @@ def classify_default_instance_zoo(
     scenario_kind: str = "stressed_five_point",
     large_candidate_count: int = 50,
     cost_per_km: float = 10_000.0,
+    enable_reconfiguration: bool = False,
 ) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     config = ExpansionProblemConfig(
         max_new_lines=max_new_lines,
         time_limit_s=time_limit,
         n_scenarios_aggregated=3,
+        enable_reconfiguration=enable_reconfiguration,
     )
     scenarios = build_scenario_set(scenario_kind)
     feeder_schedule = default_feeder_schedule(
@@ -127,8 +176,10 @@ def classify_default_instance_zoo(
     ) in feeder_schedule:
         net = load_distribution_feeder(feeder)
         # Compute baseline stress for stress-aware candidate generation
+        # The baseline stress is the "before any intervention" profile -- always
+        # reconfiguration-OFF, even when the zoo is built with reconfiguration on.
         baseline_stress = _compute_baseline_stress(
-            net, scenarios, config,
+            net, scenarios, replace(config, enable_reconfiguration=False),
         )
         for family, repeat_count in family_schedule:
             for repeat_index in range(repeat_count):
@@ -232,26 +283,24 @@ def classify_default_instance_zoo(
                         and chi_flat
                         and entropy_persistent
                     )
-                    # SCALE NOTE (Wave 5 will split this gate): "hard" here requires
-                    # tree_negative, which now means the strong exact-TN control could
-                    # not contract (a LARGE-instance property, contraction width > 28).
-                    # The n=20 NISQ zoo contracts within budget, so it classifies
-                    # "ambiguous", NOT "hard" -- correctly: the n=20 reduced QUBO is
-                    # Gurobi-easy and exact-TN-tractable. The combinatorial hardness is
-                    # at Layer A; the 2026-06-28 sweep confirmed this empirically. The
-                    # gate split will score hardness at the Layer-A / large scale and
-                    # MPS-negativity + NISQ-runnability at n=20 separately.
-                    final_classification = (
-                        "hard"
-                        if (
-                            mps_negative
-                            and tree_negative
-                            and layer_b_validated
-                            and (layer_b.mip_gap or 0.0) > _HARD_MIP_GAP_THRESHOLD
-                        )
-                        else "easy"
-                        if not mps_negative and not tree_negative
-                        else "ambiguous"
+                    # SCALE-SPLIT GATE (Wave 5). The 2026-06-28 sweep showed the
+                    # combinatorial hardness lives at LAYER A (Gurobi-time-limited);
+                    # the reduced n=20 QUBO is Gurobi-easy and exact-TN-tractable
+                    # (within_budget), so tree_negative is a LARGE-instance property.
+                    # Score the two scales separately instead of demanding both on one
+                    # instance, which is unsatisfiable at NISQ size.
+                    layer_a_hard = (
+                        layer_a.termination_status != "OPTIMAL"
+                        or (layer_a.mip_gap or 0.0) > _LAYER_A_HARD_GAP_THRESHOLD
+                    )
+                    nisq_runnable = coupling.variable_count <= _NISQ_QUBIT_LIMIT
+                    final_classification = _classify_instance(
+                        mps_negative=mps_negative,
+                        tree_negative=tree_negative,
+                        layer_a_hard=layer_a_hard,
+                        nisq_runnable=nisq_runnable,
+                        layer_b_validated=layer_b_validated,
+                        layer_b_mip_gap=layer_b.mip_gap,
                     )
                     validate_finite_array(
                         np.asarray(list(layer_a.aggregate_metrics.values()), dtype=float),
@@ -400,6 +449,11 @@ def classify_default_instance_zoo(
                             "entropy_persistent_to_chi_max": entropy_persistent,
                             "mps_negative_candidate": mps_negative,
                             "tree_tn_negative_candidate": tree_negative,
+                            "layer_a_hard": layer_a_hard,
+                            "layer_a_status": layer_a.termination_status,
+                            "layer_a_mip_gap": layer_a.mip_gap,
+                            "nisq_runnable": nisq_runnable,
+                            "variable_count": coupling.variable_count,
                             "final_classification": final_classification,
                         },
                     }
