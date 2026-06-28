@@ -24,7 +24,7 @@ from eon.formulations.qubo import compile_layer_b_qubo_hess
 from eon.instances.candidate_lines import CandidateLine, generate_candidate_lines
 from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.scenarios import Scenario, build_scenario_set
-from eon.instances.treewidth import MPS_EASY_TREEWIDTH, coupling_diagnostics
+from eon.instances.treewidth import coupling_diagnostics
 from eon.mps.protocol import run_mps_protocol
 from eon.validation import validate_finite_array
 
@@ -199,19 +199,18 @@ def classify_default_instance_zoo(
                     tree_result = mps.tree_tn_result
                     tree_negative = bool(
                         tree_result is not None
-                        # Genuine tensor-network hardness: even a near-optimal exact
-                        # contraction order (TreeSA) needs bond dimension above the chi
-                        # budget, i.e. contraction width > log2(chi_limit). HEURISTIC
-                        # (the width is an upper bound on the optimal), gated on the real
-                        # backend so the degenerate DP control can never co-sign it.
                         and tree_result.backend == "generic_tn_tropical"
-                        # Reconcile with the cheap pre-filter: an instance it
-                        # certifies MPS-easy cannot be tree-TN-negative (the GTN graph
-                        # keeps weak couplings the effective-treewidth filter drops,
-                        # which can push contraction_width over the threshold on an
-                        # otherwise-easy instance). Matches the mps_negative guard.
+                        # Tree-TN-negative = the STRONG exact-TN control could not
+                        # contract within its memory+time budget. An instance it DID
+                        # contract (within_budget) is classically tractable by exact TN,
+                        # however far its width exceeds the 1D MPS chi budget -- that
+                        # chi-budget question is mps_negative's (the chi-sweep). NB the
+                        # n=20 reduced QUBO contracts at width ~16 (penalty-saturated:
+                        # the same for reconfiguration ON and OFF), so a width threshold
+                        # is non-discriminating -- the contraction FAILURE is the real
+                        # signal, and the not-mps_easy guard keeps it physics-driven.
                         and not coupling.mps_easy
-                        and tree_result.contraction_width > MPS_EASY_TREEWIDTH
+                        and not tree_result.within_budget
                     )
                     chi_flat = _chi_plateau_across_orderings(mps)
                     entropy_persistent = _entropy_persists_to_chi_max(mps)
