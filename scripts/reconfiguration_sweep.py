@@ -1,27 +1,17 @@
-"""Joint expansion+reconfiguration hardness sweep at n>=20 with honest solves.
+"""Joint expansion+reconfiguration hardness sweep at n>=20 (PLAN.txt section 6).
 
-The Path-A go/no-go evidence (PLAN.txt section 6, REMAINING item 1). Replaces the
-n=8 / 20s / stdout-only reconfiguration_probe with a persisted, n>=20 run on the
-real tooling: enable_reconfiguration=True, a real Layer A solve-time budget, the
-GenericTensorNetworks exact-TN control (contraction width), and the MPS sweep.
-
-For every instance it records the full gate signal set -- Layer A status + MIP gap
-+ builds, J/h and effective tree-width, the GTN contraction width, the Layer B MIP
-gap, and the per-ordering MPS energies -- AND the achieved Layer A optimality gap
-next to J/h, so coupling magnitudes are read against their suboptimality (the
-gap-robust requirement). Records are appended one per line as they complete, so a
-killed run keeps its finished instances.
-
-The structural Path-A signals to read are the effective (load-bearing) tree-width
-and J/h (compare reconfiguration ON vs OFF) and the Layer A Gurobi gap -- NOT the
-GTN contraction width, which is penalty-saturated at n=20 (the same ON and OFF).
-The final hard/easy verdict is produced by classify_default_instance_zoo from the
-same signals.
+Builds instances with reconfiguration on (--no-reconfiguration for the OFF
+baseline), records the gate signals per instance -- Layer A status + MIP gap +
+builds, effective tree-width + J/h, GTN contraction width, Layer B gap, and (with
+--with-mps) the MPS sweep -- and appends one JSON line per instance as it completes.
+Read the Path-A signal from the effective (load-bearing) tree-width and J/h (compare
+ON vs OFF) and the Layer A gap; the GTN contraction width is penalty-saturated at
+n=20 and does not discriminate.
 
 Run from workspace/:
-    python scripts/reconfiguration_sweep.py [--time-limit S] [--out PATH]
-                                            [--feeders a,b] [--families a,b]
-                                            [--seeds 7,24] [--neighborhood 20]
+    python scripts/reconfiguration_sweep.py [--time-limit S] [--feeders a,b]
+        [--families a,b] [--seeds 7,24] [--neighborhood 20] [--with-mps]
+        [--no-reconfiguration] [--out PATH]
 """
 
 from __future__ import annotations
@@ -108,7 +98,10 @@ def run_instance(
     mps_section: dict[str, object] | None = None
     if with_mps:
         mps = run_mps_protocol(
-            surrogate, instance_name=instance_id, reference_energy=layer_b.objective_value
+            surrogate,
+            instance_name=instance_id,
+            reference_energy=layer_b.objective_value,
+            seed=seed,
         )
         tree = mps.tree_tn_result
         ordering_gaps = [o.best_energy - mps.reference_energy for o in mps.ordering_results]
@@ -182,7 +175,10 @@ def run_instance(
         "mps": mps_section,
         "signals": {
             "tree_negative_candidate": tree_negative_candidate,
-            "layer_a_gurobi_time_limited": layer_a.termination_status != "OPTIMAL",
+            # The exact Gurobi terminal status is in layer_a.termination_status; this
+            # flag is just "not proven optimal" (TIME_LIMIT in practice, but could be
+            # INFEASIBLE / NUMERIC -- read the status, not this label, to be sure).
+            "layer_a_not_optimal": layer_a.termination_status != "OPTIMAL",
             "layer_b_gap_open": (layer_b.mip_gap or 0.0) > 0.01,
         },
         "run": run_meta,
@@ -242,7 +238,8 @@ def main() -> None:
             nets[feeder], scenarios, baseline_config
         )
 
-    completed = 0
+    ok = 0
+    failed = 0
     with out_path.open("w") as handle:
         for index, (feeder, family, seed) in enumerate(grid, start=1):
             logger.info("[%d/%d] %s %s seed=%d", index, len(grid), feeder, family, seed)
@@ -260,6 +257,7 @@ def main() -> None:
                     baseline_stress=baseline_stress[feeder],
                     run_meta=run_meta,
                 )
+                ok += 1
             except Exception as exc:  # noqa: BLE001 -- long sweep must record and continue
                 logger.exception("instance failed: %s %s seed=%d", feeder, family, seed)
                 record = {
@@ -270,16 +268,20 @@ def main() -> None:
                     "error": f"{type(exc).__name__}: {exc}",
                     "run": run_meta,
                 }
+                failed += 1
             handle.write(json.dumps(record, sort_keys=True) + "\n")
             handle.flush()
-            completed += 1
             tn = record.get("signals", {}).get("tree_negative_candidate")  # type: ignore[union-attr]
             cw = (record.get("tree_tn") or {}).get("contraction_width")  # type: ignore[union-attr]
             logger.info(
                 "  -> contraction_width=%s tree_negative_candidate=%s", cw, tn
             )
 
-    logger.info("done: %d/%d records -> %s", completed, len(grid), out_path)
+    logger.info("done: %d ok, %d failed of %d -> %s", ok, failed, len(grid), out_path)
+    if ok == 0:
+        raise SystemExit(
+            f"reconfiguration_sweep: all {failed} instances failed; see {out_path}"
+        )
 
 
 if __name__ == "__main__":

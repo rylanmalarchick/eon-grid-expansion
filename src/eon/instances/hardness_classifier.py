@@ -232,6 +232,15 @@ def classify_default_instance_zoo(
                         and chi_flat
                         and entropy_persistent
                     )
+                    # SCALE NOTE (Wave 5 will split this gate): "hard" here requires
+                    # tree_negative, which now means the strong exact-TN control could
+                    # not contract (a LARGE-instance property, contraction width > 28).
+                    # The n=20 NISQ zoo contracts within budget, so it classifies
+                    # "ambiguous", NOT "hard" -- correctly: the n=20 reduced QUBO is
+                    # Gurobi-easy and exact-TN-tractable. The combinatorial hardness is
+                    # at Layer A; the 2026-06-28 sweep confirmed this empirically. The
+                    # gate split will score hardness at the Layer-A / large scale and
+                    # MPS-negativity + NISQ-runnability at n=20 separately.
                     final_classification = (
                         "hard"
                         if (

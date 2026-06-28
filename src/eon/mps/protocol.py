@@ -280,15 +280,35 @@ def run_tree_tn_control(
     """Run ONLY the exact tensor-network control on a Layer B surrogate (no MPS
     sweep): compile to the Ising model and contract via GenericTensorNetworks for
     the contraction width and, when contractible, the exact ground energy. The fast
-    structural hardness probe; run_mps_protocol runs the full D5 sweep."""
+    structural hardness probe; run_mps_protocol runs the full D5 sweep. A backend
+    failure degrades to None so the caller keeps its other results -- the same
+    graceful degradation run_mps_protocol applies to this control at its call site."""
     compilation = compile_layer_b_qubo_hess(surrogate)
     ising_model = _compile_qubo_to_ising(compilation, surrogate)
-    return _run_tree_tn_control(
-        ising_model,
-        seed=seed,
-        reference_energy=reference_energy,
-        memory_sc_budget=memory_sc_budget,
-    )
+    try:
+        return _run_tree_tn_control(
+            ising_model,
+            seed=seed,
+            reference_energy=reference_energy,
+            memory_sc_budget=memory_sc_budget,
+        )
+    except (
+        OSError,
+        JuliQAOATransportError,
+        JuliQAOABackendError,
+        subprocess.SubprocessError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        _logger.warning(
+            "GTN tensor-network control unavailable (%s: %s); tree-TN negativity "
+            "cannot be established.",
+            type(exc).__name__,
+            exc,
+        )
+        return None
 
 
 def _run_juliqaoa_protocol(
