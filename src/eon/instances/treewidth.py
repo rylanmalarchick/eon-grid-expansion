@@ -10,10 +10,16 @@ from eon.formulations.qubo import QuboCompilation
 
 # Couplings below this magnitude are treated as absent edges.
 _COUPLING_EPS = 1e-9
-# Structural tree-width at or below this is provably MPS-easy (and Gurobi-easy
-# by dynamic programming on the bounded-tree-width graph): discard before any
-# MPS sweep. See PLAN.txt D13 / reading.txt R30.
-MPS_EASY_TREEWIDTH = 2
+
+# The MPS protocol sweeps bond dimension up to chi_limit (eon.mps.protocol
+# run_mps_protocol default chi_limit=64). An Ising/QUBO whose load-bearing
+# coupling graph has effective tree-width w is EXACTLY representable by a tensor
+# network of bond dimension 2**w (TN contraction cost ~ exp(tree-width);
+# reading.txt R30/R18), so it is provably contractible within the sweep's budget
+# whenever 2**w <= chi_limit, i.e. w <= log2(chi_limit). With chi_limit=64 the
+# threshold is 6.  Keep _MPS_CHI_LIMIT in sync with protocol.run_mps_protocol.
+_MPS_CHI_LIMIT = 64
+MPS_EASY_TREEWIDTH = _MPS_CHI_LIMIT.bit_length() - 1  # = log2(64) = 6
 
 
 @dataclass(frozen=True, slots=True)

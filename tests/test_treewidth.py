@@ -69,13 +69,17 @@ def test_coupling_diagnostics_path_is_mps_easy() -> None:
 
 
 def test_coupling_diagnostics_complete_is_not_mps_easy() -> None:
-    n = 6
+    # K_n has tree-width n-1. It is genuinely not MPS-easy only when the tree-width
+    # exceeds the chi-budget threshold log2(chi_limit)=MPS_EASY_TREEWIDTH, i.e. exact
+    # TN contraction needs bond dimension 2**tw > chi_limit. K6 (tw 5 -> chi 32 <= 64)
+    # is in fact easy; size up so the dense regime really exceeds the budget.
+    n = MPS_EASY_TREEWIDTH + 2  # tree-width n-1 = MPS_EASY_TREEWIDTH + 1 > threshold
     edges = [(a, b) for a in range(n) for b in range(a + 1, n)]
     surrogate = _surrogate(n, edges)
     diag = coupling_diagnostics(surrogate)
     assert diag.structural_treewidth == n - 1
     assert diag.structural_density == 1.0
-    assert diag.structural_treewidth > MPS_EASY_TREEWIDTH
+    assert diag.effective_treewidth > MPS_EASY_TREEWIDTH
     assert diag.mps_easy is False
 
 
@@ -96,9 +100,13 @@ def test_weak_couplings_are_not_load_bearing() -> None:
 
 
 def test_strong_couplings_are_load_bearing() -> None:
-    surrogate = _surrogate(6, _complete_edges(6), field=1.0, edge_weight=50.0)
+    # Strong couplings (J >> h) on a dense graph stay load-bearing; at a size whose
+    # tree-width exceeds the chi-budget threshold the instance is genuinely not
+    # MPS-easy (tree-width n-1 > MPS_EASY_TREEWIDTH => bond dim 2**(n-1) > chi_limit).
+    n = MPS_EASY_TREEWIDTH + 2
+    surrogate = _surrogate(n, _complete_edges(n), field=1.0, edge_weight=50.0)
     diag = coupling_diagnostics(surrogate)
-    assert diag.effective_treewidth == 5
+    assert diag.effective_treewidth == n - 1
     assert diag.coupling_field_ratio == 50.0
     assert diag.mps_easy is False
 

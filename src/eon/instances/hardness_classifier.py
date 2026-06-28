@@ -195,6 +195,11 @@ def classify_default_instance_zoo(
                     tree_result = mps.tree_tn_result
                     tree_negative = bool(
                         tree_result is not None
+                        # The degenerate treewidth_dp_control fakes a flat chi-curve
+                        # (exact DP energy copied to every chi); it can never co-sign
+                        # genuine TN-negativity. Only a real bounded-bond tensor-network
+                        # control may. See ARCHITECTURE.txt sec 5 / PLAN.txt P2.
+                        and tree_result.backend != "treewidth_dp_control"
                         and tree_result.reference_gap > _TREE_REFERENCE_GAP_THRESHOLD
                     )
                     chi_flat = _chi_plateau_across_orderings(mps)
@@ -206,6 +211,12 @@ def classify_default_instance_zoo(
                     )
                     mps_negative = bool(
                         mps.backend == "juliqaoa_mps"
+                        # An instance the cheap tree-width pre-filter certifies
+                        # MPS-EASY cannot be MPS-negative: a flat chi-curve there is
+                        # saturation at the exact answer, not a hardness signal. This
+                        # reconciles the two diagnostics (treewidth.py threshold tied
+                        # to chi_limit) so they cannot contradict on one instance.
+                        and not coupling.mps_easy
                         and ordering_gaps
                         and all(gap > _MPS_ORDERING_GAP_THRESHOLD for gap in ordering_gaps)
                         and chi_flat
