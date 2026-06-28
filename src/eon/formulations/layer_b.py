@@ -5,9 +5,7 @@ from dataclasses import dataclass, replace
 from itertools import combinations, product
 from typing import Any
 
-import gurobipy as gp
 import numpy as np
-from gurobipy import GRB
 
 from eon.formulations.lindistflow import (
     ExpansionProblemConfig,
@@ -17,6 +15,22 @@ from eon.formulations.lindistflow import (
 from eon.instances.candidate_lines import CandidateLine
 from eon.instances.scenarios import Scenario
 from eon.validation import validate_finite_array, validate_normalized_l1
+
+
+def _gurobi() -> tuple[Any, Any]:
+    """Import gurobipy lazily so ``import eon.formulations.layer_b`` succeeds
+    without a Gurobi license. Layer B needs Gurobi for the binary-quadratic MIQP
+    optimality gap (HiGHS/SCIP do not solve the quadratic surrogate), but the
+    module must still import for reviewers without a license."""
+    try:
+        import gurobipy as gp
+        from gurobipy import GRB
+    except ImportError as exc:  # pragma: no cover - only without gurobipy installed
+        raise RuntimeError(
+            "Layer B requires gurobipy for the MIQP optimality gap. Install the "
+            "optional 'gurobi' extra and provide a license."
+        ) from exc
+    return gp, GRB
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,6 +363,7 @@ def solve_layer_b_surrogate(
     time_limit_s: float | None = None,
     mip_gap: float | None = None,
 ) -> LayerBSolution:
+    gp, GRB = _gurobi()
     model = gp.Model("layer_b_surrogate")
     model.Params.OutputFlag = 0
     if time_limit_s is not None:
@@ -606,6 +621,7 @@ def _plan_key(toggle_decisions: dict[str, int]) -> tuple[tuple[str, int], ...]:
 
 
 def _status_name(status_code: int) -> str:
+    _, GRB = _gurobi()
     status_map = {
         GRB.OPTIMAL: "OPTIMAL",
         GRB.TIME_LIMIT: "TIME_LIMIT",
