@@ -1,17 +1,17 @@
 # Exact tensor-network control for the hardness classifier.
 #
-# Replaces the degenerate treewidth-DP control (which faked a flat chi-curve by
-# copying one exact energy to every chi). This driver contracts the Ising/QUBO as
-# a real tensor network via GenericTensorNetworks.jl:
+# Contracts the Ising/QUBO as a tensor network via GenericTensorNetworks.jl:
 #   - TreeSA finds a near-optimal contraction order; its space complexity `sc` is
 #     the contraction width = log2 of the largest intermediate tensor = the bond
-#     dimension 2^sc an exact tensor network needs (reading.txt R30/R18).
-#   - When sc is within the memory budget we contract exactly (tropical / min-plus
-#     semiring) for the EXACT ground energy -- ground truth the MPS sweep is scored
-#     against. This RIGOROUSLY certifies TN-easy (we solved it).
-#   - sc above the chi budget is a HEURISTIC hardness signal only: TreeSA returns an
-#     upper bound on the optimal contraction width, so a large sc cannot certify
-#     that no narrow contraction exists. Labelled as heuristic, never a certificate.
+#     dimension 2^sc an exact tensor network needs (reading.txt R30/R18). `tc` is
+#     the time complexity (log2 of the contraction FLOPs).
+#   - When sc and tc are both within budget the network is contracted exactly
+#     (tropical / min-plus semiring) for the EXACT ground energy -- ground truth
+#     the MPS sweep is scored against, and a rigorous TN-easy certificate.
+#   - A width above the chi budget is a HEURISTIC hardness signal only: TreeSA
+#     returns an upper bound on the optimal contraction width, so a large sc cannot
+#     certify that no narrow contraction exists. Labelled as heuristic, never a
+#     certificate.
 #
 # Same JSON-in/JSON-out contract and provenance discipline as juliqaoa_driver.jl.
 
@@ -77,6 +77,8 @@ function process_spec(spec)
     constant = Float64(spec["constant"])
     memory_sc_budget =
         haskey(spec, "memory_sc_budget") ? Float64(spec["memory_sc_budget"]) : 28.0
+    time_tc_budget =
+        haskey(spec, "time_tc_budget") ? Float64(spec["time_tc_budget"]) : 38.0
     seed = haskey(spec, "seed") ? Int(spec["seed"]) : 0
 
     interactions = spec["interactions"]
@@ -88,7 +90,7 @@ function process_spec(spec)
             "contraction_width" => 0.0,
             "time_complexity" => 0.0,
             "exact_ground_energy" => constant,
-            "within_memory_budget" => true,
+            "within_budget" => true,
             "chi_required" => 1.0,
             "nqubits" => 0,
         )
@@ -97,13 +99,20 @@ function process_spec(spec)
     g, J, h = build_spinglass(nqubits, interactions)
     problem = SpinGlass(g, J, h)
 
+    # TreeSA is stochastic; seed the global RNG and use enough trials that the
+    # reported width is a stable near-optimal upper bound. Residual run-to-run
+    # variation near the threshold is handled by the not-mps_easy guard on the
+    # Python side, not by exact reproducibility here.
     Random.seed!(seed)
-    net = GenericTensorNetwork(problem; optimizer = TreeSA(ntrials = 5, niters = 50))
+    net = GenericTensorNetwork(problem; optimizer = TreeSA(ntrials = 10, niters = 50))
     cc = contraction_complexity(net)
     sc = Float64(cc.sc)
     tc = Float64(cc.tc)
 
-    within_budget = sc <= memory_sc_budget
+    # Contract exactly only when BOTH the memory (sc) and time (tc) budgets hold:
+    # solve cost ~ 2^tc, so an sc-cheap but tc-expensive instance must not be
+    # contracted (it would otherwise run to the subprocess timeout).
+    within_budget = sc <= memory_sc_budget && tc <= time_tc_budget
     exact_ground = nothing
     if within_budget
         exact_ground = Float64(solve(net, SizeMin())[].n) + constant
@@ -123,8 +132,8 @@ function process_spec(spec)
         "contraction_width" => sc,
         "time_complexity" => tc,
         "exact_ground_energy" => exact_ground,
-        "within_memory_budget" => within_budget,
-        "chi_required" => 2.0^ceil(sc),
+        "within_budget" => within_budget,
+        "chi_required" => within_budget ? 2.0^ceil(sc) : nothing,
         "nqubits" => nqubits,
     )
 end

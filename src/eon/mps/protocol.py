@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import json
+import logging
 import math
 import os
 import re
@@ -31,6 +32,7 @@ _TOGGLE_PATTERN = re.compile(r"^toggle\[(\d+)\]$")
 # building the Ising model (drops numerical dust from the QUBO -> Ising transform).
 _COEFF_ZERO_ATOL = 1e-12
 _JULIQAOA_WORKER: _JuliQAOAWorker | None = None
+_logger = logging.getLogger(__name__)
 
 
 class JuliQAOATransportError(RuntimeError):
@@ -53,10 +55,10 @@ class MpsOrderingResult:
     energy_variance: float
 
 
-# Exact tensor-network contraction needs bond dimension 2**(contraction width), so
-# 2**sc complex128 entries. A space complexity sc=28 is ~2 GiB; above this budget the
-# GTN control reports the width but does not contract (the instance is then a
-# heuristic tree-TN-negative, not a solved-easy certificate).
+# The tropical contraction's largest intermediate tensor holds 2**(contraction
+# width) Tropical{Float64} entries (8 bytes each), so sc=28 is ~2 GiB. Above this
+# budget the GTN control reports the width but does not contract -- the instance is
+# then a heuristic tree-TN-negative, not a solved-easy certificate.
 _GTN_MEMORY_SC_BUDGET = 28.0
 
 
@@ -253,7 +255,17 @@ def run_mps_protocol(
         JuliQAOABackendError,
         subprocess.SubprocessError,
         json.JSONDecodeError,
-    ):
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        _logger.warning(
+            "GTN tensor-network control unavailable for %s (%s: %s); tree-TN "
+            "negativity cannot be established for this instance.",
+            instance_name,
+            type(exc).__name__,
+            exc,
+        )
         tree_result = None
     return replace(result, tree_tn_result=tree_result)
 
@@ -699,8 +711,7 @@ def _run_tree_tn_control(
     network is contracted exactly in the tropical semiring for the EXACT ground
     energy -- ground truth for scoring the bounded-chi MPS sweep, and a rigorous
     TN-easy certificate. A width above the chi budget is only a HEURISTIC hardness
-    signal (TreeSA returns an upper bound on the optimal width). Replaces the
-    degenerate treewidth-DP control whose flat chi-curve was not a citable result.
+    signal (TreeSA returns an upper bound on the optimal width).
     """
     if not ising_model.variable_names:
         return None
@@ -710,15 +721,21 @@ def _run_tree_tn_control(
     payload = _run_gtn_control_oneshot(repo_root, spec)
 
     contraction_width = float(payload["contraction_width"])
-    within_budget = bool(payload["within_memory_budget"])
+    within_budget = bool(payload["within_budget"])
     exact_ground = payload.get("exact_ground_energy")
     best_energy = float(exact_ground) if exact_ground is not None else float("inf")
     baseline = float(reference_energy) if reference_energy is not None else best_energy
     reference_gap = best_energy - baseline if math.isfinite(best_energy) else 0.0
+    # chi_required (= 2**ceil(sc)) is reported only for contracted instances; it is
+    # null for over-budget ones (and would overflow Float64 at absurd widths).
+    chi_required = payload.get("chi_required")
+    chi_max_reached = (
+        int(chi_required) if chi_required is not None and math.isfinite(chi_required) else 0
+    )
 
     return TreeTensorControlResult(
         backend=str(payload["backend"]),
-        chi_max_reached=int(payload["chi_required"]),
+        chi_max_reached=chi_max_reached,
         chi_curve={},
         sampled_energy_curve={},
         sample_variance_curve={},

@@ -23,7 +23,11 @@ def test_mps_protocol_smoke_runs() -> None:
     # Two independent exact methods on the same compiled QUBO must agree: JuliQAOA's
     # brute-force enumeration (exact_ground_energy) and GTN's tropical contraction
     # (tree control best_energy). This cross-validates the GTN backend end to end.
-    assert result.tree_tn_result.best_energy == pytest.approx(result.exact_ground_energy)
+    # Both are exact computations of the same QUBO ground energy, so they must agree
+    # to ~machine precision, not the loose default rel=1e-6 (CLAUDE.md tolerance rule).
+    assert result.tree_tn_result.best_energy == pytest.approx(
+        result.exact_ground_energy, rel=1e-9, abs=1e-9
+    )
     assert result.exact_ground_energy <= min(
         ordering.best_energy for ordering in result.ordering_results
     )

@@ -32,8 +32,6 @@ app = typer.Typer(add_completion=False, help="Generate Layer A/Layer B hardness 
 
 # Classification thresholds. An instance is "hard" only when the MPS and tree-tensor
 # backends both flag it as negative, Layer B validates, and the Layer B MIP gap is open.
-# tree-TN reference gap above which the tree backend is "negative":
-_TREE_REFERENCE_GAP_THRESHOLD = 0.5
 # per-ordering energy gap above which MPS is "negative":
 _MPS_ORDERING_GAP_THRESHOLD = 0.5
 # min top-k agreement for Layer B to count as validated:
@@ -44,6 +42,12 @@ _FEASIBILITY_VIOLATION_THRESHOLD = 0.1
 _HARD_MIP_GAP_THRESHOLD = 0.01
 # min ordering results before a chi plateau is meaningful:
 _MIN_ORDERINGS_FOR_PLATEAU = 3
+
+
+def _finite_or_none(value: float) -> float | None:
+    """JSON has no Infinity/NaN: a non-finite tree-control energy (an over-budget
+    instance that was not contracted) serializes as null, not an invalid token."""
+    return value if math.isfinite(value) else None
 
 
 @app.command()
@@ -201,6 +205,12 @@ def classify_default_instance_zoo(
                         # (the width is an upper bound on the optimal), gated on the real
                         # backend so the degenerate DP control can never co-sign it.
                         and tree_result.backend == "generic_tn_tropical"
+                        # Reconcile with the cheap pre-filter: an instance it
+                        # certifies MPS-easy cannot be tree-TN-negative (the GTN graph
+                        # keeps weak couplings the effective-treewidth filter drops,
+                        # which can push contraction_width over the threshold on an
+                        # otherwise-easy instance). Matches the mps_negative guard.
+                        and not coupling.mps_easy
                         and tree_result.contraction_width > MPS_EASY_TREEWIDTH
                     )
                     chi_flat = _chi_plateau_across_orderings(mps)
@@ -361,8 +371,8 @@ def classify_default_instance_zoo(
                                 "sampled_energy_curve": tree_result.sampled_energy_curve,
                                 "sample_variance_curve": tree_result.sample_variance_curve,
                                 "stopped_reason": tree_result.stopped_reason,
-                                "best_energy": tree_result.best_energy,
-                                "reference_gap": tree_result.reference_gap,
+                                "best_energy": _finite_or_none(tree_result.best_energy),
+                                "reference_gap": _finite_or_none(tree_result.reference_gap),
                                 "variable_order": list(tree_result.variable_order),
                                 "max_bag_size": tree_result.max_bag_size,
                                 "contraction_width": tree_result.contraction_width,
