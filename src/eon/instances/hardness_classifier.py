@@ -24,7 +24,7 @@ from eon.formulations.qubo import compile_layer_b_qubo_hess
 from eon.instances.candidate_lines import CandidateLine, generate_candidate_lines
 from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.scenarios import Scenario, build_scenario_set
-from eon.instances.treewidth import coupling_diagnostics
+from eon.instances.treewidth import MPS_EASY_TREEWIDTH, coupling_diagnostics
 from eon.mps.protocol import run_mps_protocol
 from eon.validation import validate_finite_array
 
@@ -195,12 +195,13 @@ def classify_default_instance_zoo(
                     tree_result = mps.tree_tn_result
                     tree_negative = bool(
                         tree_result is not None
-                        # The degenerate treewidth_dp_control fakes a flat chi-curve
-                        # (exact DP energy copied to every chi); it can never co-sign
-                        # genuine TN-negativity. Only a real bounded-bond tensor-network
-                        # control may. See ARCHITECTURE.txt sec 5 / PLAN.txt P2.
-                        and tree_result.backend != "treewidth_dp_control"
-                        and tree_result.reference_gap > _TREE_REFERENCE_GAP_THRESHOLD
+                        # Genuine tensor-network hardness: even a near-optimal exact
+                        # contraction order (TreeSA) needs bond dimension above the chi
+                        # budget, i.e. contraction width > log2(chi_limit). HEURISTIC
+                        # (the width is an upper bound on the optimal), gated on the real
+                        # backend so the degenerate DP control can never co-sign it.
+                        and tree_result.backend == "generic_tn_tropical"
+                        and tree_result.contraction_width > MPS_EASY_TREEWIDTH
                     )
                     chi_flat = _chi_plateau_across_orderings(mps)
                     entropy_persistent = _entropy_persists_to_chi_max(mps)
@@ -364,6 +365,8 @@ def classify_default_instance_zoo(
                                 "reference_gap": tree_result.reference_gap,
                                 "variable_order": list(tree_result.variable_order),
                                 "max_bag_size": tree_result.max_bag_size,
+                                "contraction_width": tree_result.contraction_width,
+                                "within_budget": tree_result.within_budget,
                             }
                         ),
                         "classification": {

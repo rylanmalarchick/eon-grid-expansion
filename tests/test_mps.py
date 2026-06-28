@@ -1,3 +1,5 @@
+import pytest
+
 from eon.mps.juliqaoa_smoke import _synthetic_surrogate
 from eon.mps.protocol import run_mps_protocol
 
@@ -16,8 +18,12 @@ def test_mps_protocol_smoke_runs() -> None:
     assert result.chi_max_reached == 4
     assert len(result.ordering_results) >= 2
     assert result.tree_tn_result is not None
-    assert result.tree_tn_result.backend == "treewidth_dp_control"
-    assert result.tree_tn_result.chi_max_reached == 4
+    assert result.tree_tn_result.backend == "generic_tn_tropical"
+    assert result.tree_tn_result.within_budget is True
+    # Two independent exact methods on the same compiled QUBO must agree: JuliQAOA's
+    # brute-force enumeration (exact_ground_energy) and GTN's tropical contraction
+    # (tree control best_energy). This cross-validates the GTN backend end to end.
+    assert result.tree_tn_result.best_energy == pytest.approx(result.exact_ground_energy)
     assert result.exact_ground_energy <= min(
         ordering.best_energy for ordering in result.ordering_results
     )

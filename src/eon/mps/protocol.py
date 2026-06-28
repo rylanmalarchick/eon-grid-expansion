@@ -9,7 +9,6 @@ import subprocess
 import tempfile
 import threading
 from dataclasses import dataclass, replace
-from functools import cache
 from itertools import product
 from pathlib import Path
 from typing import Any
@@ -54,6 +53,13 @@ class MpsOrderingResult:
     energy_variance: float
 
 
+# Exact tensor-network contraction needs bond dimension 2**(contraction width), so
+# 2**sc complex128 entries. A space complexity sc=28 is ~2 GiB; above this budget the
+# GTN control reports the width but does not contract (the instance is then a
+# heuristic tree-TN-negative, not a solved-easy certificate).
+_GTN_MEMORY_SC_BUDGET = 28.0
+
+
 @dataclass(frozen=True, slots=True)
 class TreeTensorControlResult:
     backend: str
@@ -66,6 +72,11 @@ class TreeTensorControlResult:
     reference_gap: float
     variable_order: tuple[str, ...]
     max_bag_size: int
+    # TreeSA-optimized contraction width (log2 of the largest intermediate tensor =
+    # log2 of the bond dimension an exact TN needs). within_budget is True when the
+    # network was contracted exactly, so best_energy is the certified exact optimum.
+    contraction_width: float
+    within_budget: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,18 +238,23 @@ def run_mps_protocol(
             chi_values,
             reference_energy=reference_energy,
         )
-    tree_result = _run_tree_tn_control(
-        ising_model,
-        chi_values=chi_values,
-        chi_limit=chi_limit,
-        plateau_tolerance=plateau_tolerance,
-        plateau_window=plateau_window,
-        qaoa_rounds=qaoa_rounds,
-        sample_count=sample_count,
-        seed=seed,
-        reference_energy=reference_energy,
-        angles=result.optimized_angles,
-    )
+    # The tensor-network control is an optional backend: a Julia/GTN failure degrades
+    # to no control (tree_tn_result=None), which the classifier reads as "tree-TN
+    # negativity not established", never as a hardness signal.
+    try:
+        tree_result = _run_tree_tn_control(
+            ising_model,
+            seed=seed,
+            reference_energy=reference_energy,
+        )
+    except (
+        OSError,
+        JuliQAOATransportError,
+        JuliQAOABackendError,
+        subprocess.SubprocessError,
+        json.JSONDecodeError,
+    ):
+        tree_result = None
     return replace(result, tree_tn_result=tree_result)
 
 
@@ -671,76 +687,116 @@ def _ordering_specs(ising_model: _IsingModel) -> list[_OrderingSpec]:
 def _run_tree_tn_control(
     ising_model: _IsingModel,
     *,
-    chi_values: tuple[int, ...],
-    chi_limit: int,
-    plateau_tolerance: float,
-    plateau_window: int,
-    qaoa_rounds: int,
-    sample_count: int,
     seed: int,
     reference_energy: float | None,
-    angles: tuple[float, ...],
+    memory_sc_budget: float = _GTN_MEMORY_SC_BUDGET,
 ) -> TreeTensorControlResult | None:
+    """Real tensor-network control via GenericTensorNetworks.jl.
+
+    Contracts the Ising/QUBO as a tensor network. TreeSA finds a near-optimal
+    contraction order whose space complexity (contraction width) is the log2 bond
+    dimension an exact TN needs. When that width is within the memory budget the
+    network is contracted exactly in the tropical semiring for the EXACT ground
+    energy -- ground truth for scoring the bounded-chi MPS sweep, and a rigorous
+    TN-easy certificate. A width above the chi budget is only a HEURISTIC hardness
+    signal (TreeSA returns an upper bound on the optimal width). Replaces the
+    degenerate treewidth-DP control whose flat chi-curve was not a citable result.
+    """
     if not ising_model.variable_names:
         return None
 
-    ordering = _tree_control_ordering(ising_model)
-    chi_schedule = _initial_chi_schedule(chi_values, chi_limit)
-    if not chi_schedule:
-        return None
+    repo_root = Path(__file__).resolve().parents[3]
+    spec = _gtn_control_spec(ising_model, seed=seed, memory_sc_budget=memory_sc_budget)
+    payload = _run_gtn_control_oneshot(repo_root, spec)
 
-    best_energy, max_bag_size, stopped_reason = _tree_decomposition_best_energy(
-        ising_model,
-        max_bag_size_limit=20,
-    )
-    chi_curve: dict[int, float] = {}
-    sampled_energy_curve: dict[int, float] = {}
-    sample_variance_curve: dict[int, float] = {}
-    for chi in chi_schedule:
-        chi_curve[chi] = best_energy
-        sampled_energy_curve[chi] = best_energy
-        sample_variance_curve[chi] = 0.0
-
-    validate_non_negative_array(
-        np.asarray(sorted(chi_curve), dtype=float),
-        name="tree_tn_chi_schedule",
-    )
-    validate_finite_array(
-        np.asarray(list(chi_curve.values()), dtype=float),
-        name="tree_tn_energy_curve",
-    )
-    validate_finite_array(
-        np.asarray(list(sampled_energy_curve.values()), dtype=float),
-        name="tree_tn_sampled_energy_curve",
-    )
-    validate_finite_array(
-        np.asarray(list(sample_variance_curve.values()), dtype=float),
-        name="tree_tn_sample_variance_curve",
-    )
-
-    best_energy = min(sampled_energy_curve.values())
+    contraction_width = float(payload["contraction_width"])
+    within_budget = bool(payload["within_memory_budget"])
+    exact_ground = payload.get("exact_ground_energy")
+    best_energy = float(exact_ground) if exact_ground is not None else float("inf")
     baseline = float(reference_energy) if reference_energy is not None else best_energy
+    reference_gap = best_energy - baseline if math.isfinite(best_energy) else 0.0
+
     return TreeTensorControlResult(
-        backend="treewidth_dp_control",
-        chi_max_reached=max(chi_curve),
-        chi_curve=chi_curve,
-        sampled_energy_curve=sampled_energy_curve,
-        sample_variance_curve=sample_variance_curve,
-        stopped_reason=stopped_reason,
+        backend=str(payload["backend"]),
+        chi_max_reached=int(payload["chi_required"]),
+        chi_curve={},
+        sampled_energy_curve={},
+        sample_variance_curve={},
+        stopped_reason="contracted" if within_budget else "over_memory_budget",
         best_energy=best_energy,
-        reference_gap=best_energy - baseline,
-        variable_order=ordering.variable_order,
-        max_bag_size=max_bag_size,
+        reference_gap=reference_gap,
+        variable_order=tuple(ising_model.variable_names),
+        max_bag_size=int(math.ceil(contraction_width)),
+        contraction_width=contraction_width,
+        within_budget=within_budget,
     )
 
 
-def _evaluate_ising_energy(ising_model: _IsingModel, assignment: dict[str, int]) -> float:
-    energy = float(ising_model.constant)
+def _gtn_control_spec(
+    ising_model: _IsingModel, *, seed: int, memory_sc_budget: float
+) -> dict[str, object]:
+    index = {name: offset + 1 for offset, name in enumerate(ising_model.variable_names)}
+    interactions: list[dict[str, object]] = []
     for name in ising_model.variable_names:
-        energy += ising_model.local_fields.get(name, 0.0) * assignment[name]
-    for (left, right), coupling in ising_model.couplings.items():
-        energy += coupling * assignment[left] * assignment[right]
-    return energy
+        coefficient = ising_model.local_fields.get(name, 0.0)
+        if abs(coefficient) > _COEFF_ZERO_ATOL:
+            interactions.append({"qubits": [index[name]], "weight": coefficient})
+    for left, right in sorted(ising_model.couplings):
+        coefficient = ising_model.couplings[(left, right)]
+        if abs(coefficient) > _COEFF_ZERO_ATOL:
+            interactions.append({"qubits": [index[left], index[right]], "weight": coefficient})
+    return {
+        "nqubits": len(ising_model.variable_names),
+        "constant": ising_model.constant,
+        "interactions": interactions,
+        "memory_sc_budget": memory_sc_budget,
+        "seed": seed,
+    }
+
+
+def _run_gtn_control_oneshot(repo_root: Path, spec: dict[str, object]) -> dict[str, Any]:
+    driver_path = Path(__file__).with_name("gtn_control_driver.jl")
+    project_path = repo_root / "julia"
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+        json.dump(spec, handle)
+        spec_path = Path(handle.name)
+
+    try:
+        proc = subprocess.run(
+            [
+                "julia",
+                f"--project={project_path}",
+                "--startup-file=no",
+                str(driver_path),
+                str(spec_path),
+            ],
+            cwd=repo_root,
+            env={
+                **os.environ,
+                "EON_PROVENANCE_PATH": str(provenance_path()),
+                "EON_AGENTBIBLE_JULIA_PATH": str(agentbible_julia_path()),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+        )
+    finally:
+        spec_path.unlink(missing_ok=True)
+
+    if proc.returncode != 0:
+        raise JuliQAOABackendError(
+            proc.stderr.strip() or proc.stdout.strip() or "GTN control failed."
+        )
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    if not lines:
+        raise JuliQAOATransportError(
+            proc.stderr.strip() or "GTN control returned no JSON payload."
+        )
+    payload = json.loads(lines[-1])
+    if "error" in payload:
+        raise JuliQAOABackendError(str(payload["error"]))
+    return payload
 
 
 def _complete_order(graph: nx.Graph, ordering: Any) -> list[str]:
@@ -829,184 +885,3 @@ def _shutdown_juliqaoa_worker() -> None:
     if _JULIQAOA_WORKER is not None:
         _JULIQAOA_WORKER.close()
         _JULIQAOA_WORKER = None
-
-
-def _tree_control_ordering(ising_model: _IsingModel) -> _OrderingSpec:
-    orderings = {ordering.name: ordering for ordering in _ordering_specs(ising_model)}
-    for name in (
-        "reverse_cuthill_mckee",
-        "cuthill_mckee",
-        "degree",
-        "bfs",
-        "identity",
-    ):
-        ordering = orderings.get(name)
-        if ordering is not None:
-            return ordering
-    return _OrderingSpec("identity", ising_model.variable_names)
-
-
-def _tree_decomposition_best_energy(
-    ising_model: _IsingModel,
-    *,
-    max_bag_size_limit: int,
-) -> tuple[float, int, str]:
-    graph = nx.Graph()
-    graph.add_nodes_from(ising_model.variable_names)
-    for (left, right), coefficient in ising_model.couplings.items():
-        graph.add_edge(left, right, weight=abs(coefficient))
-
-    if graph.number_of_nodes() == 0:
-        return float(ising_model.constant), 0, "exact_tree_decomposition"
-
-    _, decomposition = nx.approximation.treewidth_min_fill_in(graph)
-    max_bag_size = max((len(bag) for bag in decomposition.nodes), default=0)
-    if max_bag_size > max_bag_size_limit:
-        best_energy = _treewidth_limit_fallback_energy(ising_model, graph)
-        return best_energy, max_bag_size, "treewidth_limit_fallback"
-
-    root = max(decomposition.nodes, key=len)
-    parent: dict[frozenset[str], frozenset[str] | None] = {root: None}
-    children: dict[frozenset[str], list[frozenset[str]]] = {root: []}
-    depth: dict[frozenset[str], int] = {root: 0}
-    stack = [root]
-    while stack:
-        bag = stack.pop()
-        for neighbor in decomposition.neighbors(bag):
-            if neighbor == parent.get(bag):
-                continue
-            parent[neighbor] = bag
-            children.setdefault(bag, []).append(neighbor)
-            children.setdefault(neighbor, [])
-            depth[neighbor] = depth[bag] + 1
-            stack.append(neighbor)
-
-    bag_vars = {bag: tuple(sorted(bag)) for bag in decomposition.nodes}
-    assigned_factors: dict[frozenset[str], list[tuple[tuple[str, ...], float]]] = {
-        bag: [] for bag in decomposition.nodes
-    }
-    for name, coefficient in ising_model.local_fields.items():
-        if abs(coefficient) <= _COEFF_ZERO_ATOL:
-            continue
-        scope = (name,)
-        bag = _deepest_covering_bag(scope, decomposition.nodes, depth)
-        assigned_factors[bag].append((scope, coefficient))
-    for (left, right), coefficient in ising_model.couplings.items():
-        if abs(coefficient) <= _COEFF_ZERO_ATOL:
-            continue
-        pair_scope: tuple[str, ...] = tuple(sorted((left, right)))
-        bag = _deepest_covering_bag(pair_scope, decomposition.nodes, depth)
-        assigned_factors[bag].append((pair_scope, coefficient))
-
-    separator_vars: dict[frozenset[str], tuple[str, ...]] = {
-        bag: tuple(sorted(bag & parent_bag)) if parent_bag is not None else ()
-        for bag, parent_bag in parent.items()
-    }
-
-    @cache
-    def solve_bag(bag: frozenset[str]) -> dict[tuple[int, ...], float]:
-        vars_in_bag = bag_vars[bag]
-        child_solutions = {
-            child: solve_bag(child)
-            for child in children[bag]
-        }
-        child_separators = {
-            child: separator_vars[child]
-            for child in children[bag]
-        }
-        separator = separator_vars[bag]
-        best_by_separator: dict[tuple[int, ...], float] = {}
-        for spins in product((-1, 1), repeat=len(vars_in_bag)):
-            assignment = dict(zip(vars_in_bag, spins, strict=True))
-            cost = 0.0
-            for scope, coefficient in assigned_factors[bag]:
-                if len(scope) == 1:
-                    cost += coefficient * assignment[scope[0]]
-                else:
-                    cost += coefficient * assignment[scope[0]] * assignment[scope[1]]
-            for child, child_message in child_solutions.items():
-                child_separator = child_separators[child]
-                child_key = tuple(assignment[name] for name in child_separator)
-                cost += child_message[child_key]
-            separator_key = tuple(assignment[name] for name in separator)
-            best_by_separator[separator_key] = min(
-                best_by_separator.get(separator_key, float("inf")),
-                cost,
-            )
-        return best_by_separator
-
-    best_energy = float(ising_model.constant) + solve_bag(root)[()]
-    return best_energy, max_bag_size, "exact_tree_decomposition"
-
-
-def _deepest_covering_bag(
-    scope: tuple[str, ...],
-    bags: Any,
-    depth: dict[frozenset[str], int],
-) -> frozenset[str]:
-    return max(
-        (bag for bag in bags if all(name in bag for name in scope)),
-        key=lambda bag: depth[bag],
-    )
-
-
-def _treewidth_limit_fallback_energy(
-    ising_model: _IsingModel,
-    graph: nx.Graph,
-) -> float:
-    if graph.number_of_edges():
-        tree = nx.maximum_spanning_tree(graph, weight="weight")
-    else:
-        tree = graph.copy()
-    assignment = _tree_assignment_on_spanning_tree(ising_model, tree)
-    return _evaluate_ising_energy(ising_model, assignment)
-
-
-def _tree_assignment_on_spanning_tree(
-    ising_model: _IsingModel,
-    tree: nx.Graph,
-    ) -> dict[str, int]:
-    spins = (-1, 1)
-
-    def solve_component(root: str) -> dict[int, tuple[float, dict[str, int]]]:
-        def solve_node(
-            node: str,
-            parent_node: str | None,
-        ) -> dict[int, tuple[float, dict[str, int]]]:
-            child_solutions = {
-                child: solve_node(child, node)
-                for child in tree.neighbors(node)
-                if child != parent_node
-            }
-            results: dict[int, tuple[float, dict[str, int]]] = {}
-            for spin in spins:
-                cost = ising_model.local_fields.get(node, 0.0) * spin
-                assignment = {node: spin}
-                for child, child_result in child_solutions.items():
-                    coupling = float(
-                        ising_model.couplings.get(tuple(sorted((node, child))), 0.0)
-                    )
-                    child_spin, child_cost, child_assignment = min(
-                        (
-                            candidate_spin,
-                            coupling * spin * candidate_spin + candidate_value[0],
-                            candidate_value[1],
-                        )
-                        for candidate_spin, candidate_value in child_result.items()
-                    )
-                    cost += child_cost
-                    assignment.update(child_assignment)
-                    assignment[child] = child_spin
-                results[spin] = (cost, assignment)
-            return results
-
-        return solve_node(root, None)
-
-    final_assignment: dict[str, int] = {}
-    for component in nx.connected_components(tree):
-        root = next(iter(component))
-        _, assignment = min(solve_component(root).values(), key=lambda item: item[0])
-        final_assignment.update(assignment)
-    for node in ising_model.variable_names:
-        final_assignment.setdefault(node, 1)
-    return final_assignment
