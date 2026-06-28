@@ -270,6 +270,27 @@ def run_mps_protocol(
     return replace(result, tree_tn_result=tree_result)
 
 
+def run_tree_tn_control(
+    surrogate: LayerBSurrogate,
+    *,
+    seed: int = 7,
+    reference_energy: float | None = None,
+    memory_sc_budget: float = _GTN_MEMORY_SC_BUDGET,
+) -> TreeTensorControlResult | None:
+    """Run ONLY the exact tensor-network control on a Layer B surrogate (no MPS
+    sweep): compile to the Ising model and contract via GenericTensorNetworks for
+    the contraction width and, when contractible, the exact ground energy. The fast
+    structural hardness probe; run_mps_protocol runs the full D5 sweep."""
+    compilation = compile_layer_b_qubo_hess(surrogate)
+    ising_model = _compile_qubo_to_ising(compilation, surrogate)
+    return _run_tree_tn_control(
+        ising_model,
+        seed=seed,
+        reference_energy=reference_energy,
+        memory_sc_budget=memory_sc_budget,
+    )
+
+
 def _run_juliqaoa_protocol(
     ising_model: _IsingModel,
     orderings: list[_OrderingSpec],
