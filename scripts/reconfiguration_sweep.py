@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,6 +44,11 @@ COST_PER_KM = 10_000.0
 SCENARIO_KIND = "stressed_five_point"
 
 
+def _finite(value: float | None) -> float | None:
+    """JSON has no Infinity/NaN; serialize a non-finite energy as null."""
+    return value if value is not None and math.isfinite(value) else None
+
+
 def _git_commit() -> str:
     try:
         return subprocess.run(
@@ -65,6 +71,8 @@ def run_instance(
     time_limit: float,
     with_mps: bool,
     reconfiguration: bool,
+    qaoa_rounds: int,
+    angle_iterations: int,
     net: object,
     scenarios: list,
     baseline_stress: dict[int, float],
@@ -102,16 +110,34 @@ def run_instance(
             instance_name=instance_id,
             reference_energy=layer_b.objective_value,
             seed=seed,
+            qaoa_rounds=qaoa_rounds,
+            angle_iterations=angle_iterations,
         )
         tree = mps.tree_tn_result
         ordering_gaps = [o.best_energy - mps.reference_energy for o in mps.ordering_results]
         mps_section = {
             "backend": mps.backend,
             "chi_max_reached": mps.chi_max_reached,
-            "reference_energy": mps.reference_energy,
-            "exact_ground_energy": mps.exact_ground_energy,
-            "ordering_best_energies": [o.best_energy for o in mps.ordering_results],
-            "ordering_gaps_vs_reference": ordering_gaps,
+            "reference_energy": _finite(mps.reference_energy),
+            "exact_ground_energy": _finite(mps.exact_ground_energy),
+            # The MPS-negativity signal: best chi=64 MPS energy vs the exact ground
+            # (from the GTN control, tree_tn.exact_ground_energy). A positive gap means
+            # bounded-chi MPS misses the optimum -- the brief's outcome 4.
+            "best_energy_over_orderings": _finite(
+                min((o.best_energy for o in mps.ordering_results), default=float("inf"))
+            ),
+            "orderings": [
+                {
+                    "ordering": o.ordering,
+                    "best_energy": _finite(o.best_energy),
+                    "chi_curve": {
+                        str(chi): _finite(energy) for chi, energy in sorted(o.chi_curve.items())
+                    },
+                    "max_entropy": _finite(max(o.entropy_curve.values(), default=0.0)),
+                }
+                for o in mps.ordering_results
+            ],
+            "ordering_gaps_vs_reference": [_finite(g) for g in ordering_gaps],
         }
     else:
         tree = run_tree_tn_control(
@@ -204,6 +230,10 @@ def main() -> None:
         action="store_false",
         help="Build with reconfiguration OFF (the baseline for the ON/OFF comparison).",
     )
+    parser.add_argument("--qaoa-rounds", type=int, default=1, help="QAOA p (MPS sweep depth).")
+    parser.add_argument(
+        "--angle-iterations", type=int, default=10, help="QAOA angle-optimization iterations."
+    )
     args = parser.parse_args()
 
     feeders = [f.strip() for f in args.feeders.split(",") if f.strip()]
@@ -221,6 +251,7 @@ def main() -> None:
         "git_commit": _git_commit(),
         "timestamp_utc": stamp,
         "scenario_kind": SCENARIO_KIND,
+        "qaoa_rounds": args.qaoa_rounds,
     }
 
     grid = [(f, fam, s) for f in feeders for fam in families for s in seeds]
@@ -252,6 +283,8 @@ def main() -> None:
                     time_limit=args.time_limit,
                     with_mps=args.with_mps,
                     reconfiguration=args.reconfiguration,
+                    qaoa_rounds=args.qaoa_rounds,
+                    angle_iterations=args.angle_iterations,
                     net=nets[feeder],
                     scenarios=scenarios,
                     baseline_stress=baseline_stress[feeder],
