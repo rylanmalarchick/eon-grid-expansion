@@ -18,7 +18,11 @@ import networkx as nx
 import numpy as np
 
 from eon.formulations.layer_b import LayerBSurrogate
-from eon.formulations.qubo import QuboCompilation, compile_layer_b_qubo_hess
+from eon.formulations.qubo import (
+    QuboCompilation,
+    compile_external_qubo,
+    compile_layer_b_qubo_hess,
+)
 from eon.validation import (
     agentbible_julia_path,
     provenance_path,
@@ -204,8 +208,13 @@ def run_mps_protocol(
     cutoff: float = 1e-6,
     seed: int = 7,
     reference_energy: float | None = None,
+    penalty_free: bool = False,
 ) -> MpsProtocolResult:
-    compilation = compile_layer_b_qubo_hess(surrogate)
+    # penalty_free is REQUIRED for external / Path B instances: they carry no
+    # cardinality constraint, and the Hess penalty's O(n^2) couplings would fake
+    # the tree-TN hardness signal (compiled tree-width ~ n-1 regardless of J).
+    compile_fn = compile_external_qubo if penalty_free else compile_layer_b_qubo_hess
+    compilation = compile_fn(surrogate)
     ising_model = _compile_qubo_to_ising(compilation, surrogate)
     orderings = _ordering_specs(ising_model)
 
@@ -276,14 +285,18 @@ def run_tree_tn_control(
     seed: int = 7,
     reference_energy: float | None = None,
     memory_sc_budget: float = _GTN_MEMORY_SC_BUDGET,
+    penalty_free: bool = False,
 ) -> TreeTensorControlResult | None:
     """Run ONLY the exact tensor-network control on a Layer B surrogate (no MPS
     sweep): compile to the Ising model and contract via GenericTensorNetworks for
     the contraction width and, when contractible, the exact ground energy. The fast
     structural hardness probe; run_mps_protocol runs the full D5 sweep. A backend
     failure degrades to None so the caller keeps its other results -- the same
-    graceful degradation run_mps_protocol applies to this control at its call site."""
-    compilation = compile_layer_b_qubo_hess(surrogate)
+    graceful degradation run_mps_protocol applies to this control at its call site.
+    penalty_free is REQUIRED for external / Path B instances (no cardinality
+    constraint; the Hess penalty would fake the tree-TN hardness signal)."""
+    compile_fn = compile_external_qubo if penalty_free else compile_layer_b_qubo_hess
+    compilation = compile_fn(surrogate)
     ising_model = _compile_qubo_to_ising(compilation, surrogate)
     try:
         return _run_tree_tn_control(

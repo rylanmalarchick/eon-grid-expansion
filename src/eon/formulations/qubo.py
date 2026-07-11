@@ -103,6 +103,31 @@ def compile_layer_b_qubo_hess(
     )
 
 
+def compile_external_qubo(surrogate: LayerBSurrogate) -> QuboCompilation:
+    """Compile WITHOUT any cardinality penalty. External / Path B instances carry
+    no at-most-K constraint; the Hess penalty adds O(n^2) all-pairs couplings that
+    densify the coupling graph (compiled tree-width ~ n-1) and would fake the
+    tree-TN hardness signal."""
+    labels = tuple(f"toggle[{i}]" for i in range(len(surrogate.variables)))
+    label_by_name = {
+        variable.name: labels[index] for index, variable in enumerate(surrogate.variables)
+    }
+    qubo: dict[tuple[str, str], float] = {}
+    for variable in surrogate.variables:
+        _add_linear_term(qubo, label_by_name[variable.name], surrogate.linear[variable.name])
+    for (left, right), coefficient in surrogate.quadratic.items():
+        _add_quadratic_term(qubo, label_by_name[left], label_by_name[right], coefficient)
+    qubo = {key: value for key, value in qubo.items() if abs(value) > 1e-12}
+    _validate_qubo_matrix(qubo, len(labels))
+    return QuboCompilation(
+        qubo=qubo,
+        offset=float(surrogate.offset),
+        penalty_strength=0.0,
+        target_selected_count=surrogate.base_selected_count,
+        method="penalty_free",
+    )
+
+
 def solve_qubo_with_neal(
     surrogate: LayerBSurrogate,
     compilation: QuboCompilation,
