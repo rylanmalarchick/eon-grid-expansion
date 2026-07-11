@@ -8,10 +8,15 @@ Read the Path-A signal from the effective (load-bearing) tree-width and J/h (com
 ON vs OFF) and the Layer A gap; the GTN contraction width is penalty-saturated at
 n=20 and does not discriminate.
 
+With --with-mps, --qaoa-rounds takes a comma list (e.g. 1,2,3): Layer A is solved
+ONCE per instance and the MPS sweep runs once per p on that single surrogate, one
+JSON line per (instance, p). Separate runs are NOT a controlled p-comparison --
+the Gurobi TIME_LIMIT incumbent varies run-to-run and the reduced QUBO with it.
+
 Run from workspace/:
     python scripts/reconfiguration_sweep.py [--time-limit S] [--feeders a,b]
         [--families a,b] [--seeds 7,24] [--neighborhood 20] [--with-mps]
-        [--no-reconfiguration] [--out PATH]
+        [--no-reconfiguration] [--qaoa-rounds 1,2,3] [--out PATH] [--log-file PATH]
 """
 
 from __future__ import annotations
@@ -21,19 +26,21 @@ import json
 import logging
 import math
 import subprocess
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
-from eon.formulations.layer_b import solve_layer_b_surrogate
-from eon.formulations.lindistflow import ExpansionProblemConfig
+from eon.formulations.layer_b import LayerBSolution, solve_layer_b_surrogate
+from eon.formulations.lindistflow import ExpansionProblemConfig, ExpansionResult
 from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.hardness_classifier import (
     _compute_baseline_stress,
     build_instance_surrogate,
 )
 from eon.instances.scenarios import build_scenario_set
-from eon.instances.treewidth import coupling_diagnostics
-from eon.mps.protocol import run_mps_protocol, run_tree_tn_control
+from eon.instances.treewidth import CouplingDiagnostics, coupling_diagnostics
+from eon.mps.protocol import TreeTensorControlResult, run_mps_protocol, run_tree_tn_control
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("reconfiguration_sweep")
@@ -71,13 +78,14 @@ def run_instance(
     time_limit: float,
     with_mps: bool,
     reconfiguration: bool,
-    qaoa_rounds: int,
+    qaoa_rounds_list: list[int],
     angle_iterations: int,
     net: object,
     scenarios: list,
     baseline_stress: dict[int, float],
     run_meta: dict[str, object],
-) -> dict[str, object]:
+) -> Iterator[dict[str, object]]:
+    """Yield one record per QAOA depth p, all on ONE Layer A solve / surrogate."""
     config = ExpansionProblemConfig(
         max_new_lines=MAX_NEW_LINES,
         time_limit_s=time_limit,
@@ -100,11 +108,31 @@ def run_instance(
     layer_b = solve_layer_b_surrogate(surrogate, time_limit_s=time_limit, mip_gap=0.01)
     instance_id = f"{feeder}:{family}:seed{seed}:n{coupling.variable_count}"
 
-    # The full MPS sweep (D5) is expensive; the structural Path-A question (does
-    # reconfiguration push the contraction width above the chi budget?) needs only
-    # the exact-TN control. Run the full sweep only when --with-mps is set.
-    mps_section: dict[str, object] | None = None
-    if with_mps:
+    if not with_mps:
+        # The structural Path-A question needs only the exact-TN control; p is
+        # meaningless without the MPS sweep (recorded as qaoa_rounds=None).
+        tree = run_tree_tn_control(
+            surrogate, seed=seed, reference_energy=layer_b.objective_value
+        )
+        yield _make_record(
+            instance_id,
+            feeder,
+            family,
+            seed,
+            neighborhood_size=neighborhood_size,
+            reconfiguration=reconfiguration,
+            with_mps=with_mps,
+            layer_a=layer_a,
+            coupling=coupling,
+            layer_b=layer_b,
+            tree=tree,
+            mps_section=None,
+            qaoa_rounds=None,
+            run_meta=run_meta,
+        )
+        return
+
+    for qaoa_rounds in qaoa_rounds_list:
         mps = run_mps_protocol(
             surrogate,
             instance_name=instance_id,
@@ -115,7 +143,7 @@ def run_instance(
         )
         tree = mps.tree_tn_result
         ordering_gaps = [o.best_energy - mps.reference_energy for o in mps.ordering_results]
-        mps_section = {
+        mps_section: dict[str, object] = {
             "backend": mps.backend,
             "chi_max_reached": mps.chi_max_reached,
             "reference_energy": _finite(mps.reference_energy),
@@ -139,11 +167,41 @@ def run_instance(
             ],
             "ordering_gaps_vs_reference": [_finite(g) for g in ordering_gaps],
         }
-    else:
-        tree = run_tree_tn_control(
-            surrogate, seed=seed, reference_energy=layer_b.objective_value
+        yield _make_record(
+            instance_id,
+            feeder,
+            family,
+            seed,
+            neighborhood_size=neighborhood_size,
+            reconfiguration=reconfiguration,
+            with_mps=with_mps,
+            layer_a=layer_a,
+            coupling=coupling,
+            layer_b=layer_b,
+            tree=tree,
+            mps_section=mps_section,
+            qaoa_rounds=qaoa_rounds,
+            run_meta=run_meta,
         )
 
+
+def _make_record(
+    instance_id: str,
+    feeder: str,
+    family: str,
+    seed: int,
+    *,
+    neighborhood_size: int,
+    reconfiguration: bool,
+    with_mps: bool,
+    layer_a: ExpansionResult,
+    coupling: CouplingDiagnostics,
+    layer_b: LayerBSolution,
+    tree: TreeTensorControlResult | None,
+    mps_section: dict[str, object] | None,
+    qaoa_rounds: int | None,
+    run_meta: dict[str, object],
+) -> dict[str, object]:
     # Tree-TN-negative = the strong exact-TN control could NOT contract within budget
     # (within_budget=False). Contraction width alone is penalty-saturated at n=20 (the
     # same for reconfiguration ON and OFF), so it does NOT discriminate; the honest
@@ -207,7 +265,7 @@ def run_instance(
             "layer_a_not_optimal": layer_a.termination_status != "OPTIMAL",
             "layer_b_gap_open": (layer_b.mip_gap or 0.0) > 0.01,
         },
-        "run": run_meta,
+        "run": {**run_meta, "qaoa_rounds": qaoa_rounds},
     }
 
 
@@ -230,15 +288,28 @@ def main() -> None:
         action="store_false",
         help="Build with reconfiguration OFF (the baseline for the ON/OFF comparison).",
     )
-    parser.add_argument("--qaoa-rounds", type=int, default=1, help="QAOA p (MPS sweep depth).")
+    parser.add_argument(
+        "--qaoa-rounds",
+        default="1",
+        help="QAOA p (MPS sweep depth); comma list sweeps p on ONE Layer A solve.",
+    )
     parser.add_argument(
         "--angle-iterations", type=int, default=10, help="QAOA angle-optimization iterations."
+    )
+    parser.add_argument(
+        "--log-file",
+        default="",
+        help="Log file path (default: <out>.log next to the JSONL) so a killed run "
+        "leaves a forensic trail.",
     )
     args = parser.parse_args()
 
     feeders = [f.strip() for f in args.feeders.split(",") if f.strip()]
     families = [f.strip() for f in args.families.split(",") if f.strip()]
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
+    qaoa_rounds_list = [int(p) for p in str(args.qaoa_rounds).split(",") if p.strip()]
+    if not qaoa_rounds_list or any(p < 1 for p in qaoa_rounds_list):
+        raise SystemExit(f"--qaoa-rounds must be positive ints, got {args.qaoa_rounds!r}")
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_path = (
         Path(args.out)
@@ -246,16 +317,25 @@ def main() -> None:
         else Path(f"experiments/results/reconfig_sweep_{stamp}/sweep.jsonl")
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path = Path(args.log_file) if args.log_file else out_path.with_suffix(".log")
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(file_handler)
     run_meta: dict[str, object] = {
         "time_limit_s": args.time_limit,
         "git_commit": _git_commit(),
         "timestamp_utc": stamp,
         "scenario_kind": SCENARIO_KIND,
-        "qaoa_rounds": args.qaoa_rounds,
     }
 
     grid = [(f, fam, s) for f in feeders for fam in families for s in seeds]
-    logger.info("sweep: %d instances -> %s", len(grid), out_path)
+    logger.info(
+        "sweep: %d instances x p in %s -> %s (log: %s)",
+        len(grid),
+        qaoa_rounds_list,
+        out_path,
+        log_path,
+    )
 
     scenarios = build_scenario_set(SCENARIO_KIND)
     baseline_config = ExpansionProblemConfig(
@@ -275,7 +355,9 @@ def main() -> None:
         for index, (feeder, family, seed) in enumerate(grid, start=1):
             logger.info("[%d/%d] %s %s seed=%d", index, len(grid), feeder, family, seed)
             try:
-                record = run_instance(
+                # Generator: records stream out per p; a crash mid-sweep keeps the
+                # p-values already written (the empty-p2.jsonl lesson).
+                for record in run_instance(
                     feeder,
                     family,
                     seed,
@@ -283,17 +365,28 @@ def main() -> None:
                     time_limit=args.time_limit,
                     with_mps=args.with_mps,
                     reconfiguration=args.reconfiguration,
-                    qaoa_rounds=args.qaoa_rounds,
+                    qaoa_rounds_list=qaoa_rounds_list,
                     angle_iterations=args.angle_iterations,
                     net=nets[feeder],
                     scenarios=scenarios,
                     baseline_stress=baseline_stress[feeder],
                     run_meta=run_meta,
-                )
+                ):
+                    handle.write(json.dumps(record, sort_keys=True) + "\n")
+                    handle.flush()
+                    run_block = cast(dict[str, object], record.get("run") or {})
+                    tree_block = cast(dict[str, object], record.get("tree_tn") or {})
+                    signal_block = cast(dict[str, object], record.get("signals") or {})
+                    logger.info(
+                        "  -> p=%s contraction_width=%s tree_negative_candidate=%s",
+                        run_block.get("qaoa_rounds"),
+                        tree_block.get("contraction_width"),
+                        signal_block.get("tree_negative_candidate"),
+                    )
                 ok += 1
             except Exception as exc:  # noqa: BLE001 -- long sweep must record and continue
                 logger.exception("instance failed: %s %s seed=%d", feeder, family, seed)
-                record = {
+                error_record = {
                     "instance_id": f"{feeder}:{family}:seed{seed}",
                     "feeder": feeder,
                     "family": family,
@@ -301,14 +394,9 @@ def main() -> None:
                     "error": f"{type(exc).__name__}: {exc}",
                     "run": run_meta,
                 }
+                handle.write(json.dumps(error_record, sort_keys=True) + "\n")
+                handle.flush()
                 failed += 1
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
-            handle.flush()
-            tn = record.get("signals", {}).get("tree_negative_candidate")  # type: ignore[union-attr]
-            cw = (record.get("tree_tn") or {}).get("contraction_width")  # type: ignore[union-attr]
-            logger.info(
-                "  -> contraction_width=%s tree_negative_candidate=%s", cw, tn
-            )
 
     logger.info("done: %d ok, %d failed of %d -> %s", ok, failed, len(grid), out_path)
     if ok == 0:
