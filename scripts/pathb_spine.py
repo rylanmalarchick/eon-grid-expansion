@@ -30,6 +30,7 @@ import math
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from eon.formulations.layer_b import solve_layer_b_surrogate
 from eon.formulations.qubo import compile_external_qubo, solve_qubo_with_neal
@@ -190,6 +191,17 @@ def main() -> None:
     parser.add_argument("--seeds", default="7,24")
     parser.add_argument("--fused-sizes", default="20,30,50,100")
     parser.add_argument("--glass-sizes", default="50,100,200")
+    parser.add_argument(
+        "--glass-mean-degree",
+        type=float,
+        default=6.0,
+        help="Spin-glass mean degree; <= 0 means complete graph (dense SK-style).",
+    )
+    parser.add_argument(
+        "--glass-coefficient-range",
+        default="",
+        help="Integer coupling range 'low,high' for the spin glass (default +-1).",
+    )
     parser.add_argument("--alpha", type=float, default=0.1)
     parser.add_argument("--block-size", type=int, default=10)
     parser.add_argument("--with-mps", action="store_true")
@@ -212,10 +224,17 @@ def main() -> None:
     file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logging.getLogger().addHandler(file_handler)
 
+    glass_range: tuple[int, int] | None = None
+    if args.glass_coefficient_range:
+        low, high = (int(v) for v in args.glass_coefficient_range.split(","))
+        glass_range = (low, high)
+
     run_meta: dict[str, object] = {
         "time_limit_s": args.time_limit,
         "alpha": args.alpha,
         "block_size": args.block_size,
+        "glass_mean_degree": args.glass_mean_degree,
+        "glass_coefficient_range": None if glass_range is None else list(glass_range),
         "git_commit": _git_commit(),
         "timestamp_utc": stamp,
     }
@@ -232,7 +251,17 @@ def main() -> None:
                 )
             )
         for n in glass_sizes:
-            jobs.append((generate_longrange_spin_glass(n, seed), seed))
+            jobs.append(
+                (
+                    generate_longrange_spin_glass(
+                        n,
+                        seed,
+                        mean_degree=args.glass_mean_degree,
+                        coefficient_range=glass_range,
+                    ),
+                    seed,
+                )
+            )
 
     logger.info("pathb spine: %d instances -> %s (log: %s)", len(jobs), out_path, log_path)
     ok = 0
@@ -261,10 +290,11 @@ def main() -> None:
                 failed += 1
             handle.write(json.dumps(record, sort_keys=True) + "\n")
             handle.flush()
-            signals = record.get("signals") or {}
+            signals = cast(dict[str, object], record.get("signals") or {})
+            gurobi_block = cast(dict[str, object], record.get("gurobi") or {})
             logger.info(
                 "  -> gurobi=%s tree_negative=%s hardness_tier=%s",
-                (record.get("gurobi") or {}).get("status"),
+                gurobi_block.get("status"),
                 signals.get("tree_tn_negative"),
                 signals.get("hardness_tier_candidate"),
             )

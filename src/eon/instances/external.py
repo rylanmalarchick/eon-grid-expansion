@@ -424,35 +424,54 @@ def generate_longrange_spin_glass(
     *,
     mean_degree: float = 6.0,
     coupling_magnitude: float = 1.0,
+    coefficient_range: tuple[int, int] | None = None,
     field_scale: float = 0.1,
     name: str | None = None,
 ) -> ExternalQuboInstance:
     """Random +-J couplings on ~mean_degree * n / 2 uniformly random long-range
     pairs, weak random fields. Non-geometric, so the coupling graph is an
     Erdos-Renyi-like expander: tree-width Theta(n) at fixed mean degree -- the
-    tree-TN-negativity workhorse. No planted optimum (label heuristic)."""
+    tree-TN-negativity workhorse. mean_degree <= 0 gives the complete graph
+    (dense SK-style, the Gurobi-hardness escalation). coefficient_range draws
+    integer couplings from [low, high] (zero draws resampled) instead of +-J.
+    No planted optimum (label heuristic)."""
     if n < 3:
         raise ValueError(f"spin glass needs n >= 3, got {n}")
     rng = random.Random(seed)
-    edge_target = int(round(mean_degree * n / 2))
-    edges: set[tuple[int, int]] = set()
     max_edges = n * (n - 1) // 2
-    edge_target = min(edge_target, max_edges)
-    while len(edges) < edge_target:
-        i, j = rng.sample(range(n), 2)
-        edges.add((i, j) if i < j else (j, i))
+    if mean_degree <= 0:
+        edges: set[tuple[int, int]] = {
+            (i, j) for i in range(n) for j in range(i + 1, n)
+        }
+    else:
+        edge_target = min(int(round(mean_degree * n / 2)), max_edges)
+        edges = set()
+        while len(edges) < edge_target:
+            i, j = rng.sample(range(n), 2)
+            edges.add((i, j) if i < j else (j, i))
+
+    nonzero_choices: list[float] | None = None
+    if coefficient_range is not None:
+        low, high = coefficient_range
+        nonzero_choices = [float(v) for v in range(low, high + 1) if v != 0]
+        if not nonzero_choices:
+            raise ValueError(f"coefficient_range {coefficient_range} has no nonzero values")
+
+    def _coupling() -> float:
+        if nonzero_choices is None:
+            return coupling_magnitude * rng.choice((-1.0, 1.0))
+        return rng.choice(nonzero_choices)
 
     names = _variable_names(n)
-    quadratic = {
-        (names[i], names[j]): coupling_magnitude * rng.choice((-1.0, 1.0)) for i, j in edges
-    }
+    quadratic = {(names[i], names[j]): _coupling() for i, j in sorted(edges)}
     linear = {
         names[i]: field_scale * rng.uniform(-1.0, 1.0)
         for i in range(n)
         if field_scale > 0.0
     }
+    degree_tag = "dense" if mean_degree <= 0 else f"d{mean_degree:g}"
     return ExternalQuboInstance(
-        name=name or f"longrange_spin_glass_n{n}_s{seed}",
+        name=name or f"longrange_spin_glass_n{n}_s{seed}_{degree_tag}",
         variable_names=names,
         offset=0.0,
         linear=linear,
@@ -462,6 +481,7 @@ def generate_longrange_spin_glass(
         metadata={
             "generator": "longrange_spin_glass",
             "mean_degree": mean_degree,
+            "coefficient_range": None if coefficient_range is None else list(coefficient_range),
             "edge_count": len(edges),
             "seed": seed,
         },
