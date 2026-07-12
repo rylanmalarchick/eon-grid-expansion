@@ -286,6 +286,9 @@ def run_tree_tn_control(
     reference_energy: float | None = None,
     memory_sc_budget: float = _GTN_MEMORY_SC_BUDGET,
     penalty_free: bool = False,
+    treesa_ntrials: int = 10,
+    treesa_niters: int = 50,
+    timeout_s: float = 600.0,
 ) -> TreeTensorControlResult | None:
     """Run ONLY the exact tensor-network control on a Layer B surrogate (no MPS
     sweep): compile to the Ising model and contract via GenericTensorNetworks for
@@ -304,6 +307,9 @@ def run_tree_tn_control(
             seed=seed,
             reference_energy=reference_energy,
             memory_sc_budget=memory_sc_budget,
+            treesa_ntrials=treesa_ntrials,
+            treesa_niters=treesa_niters,
+            timeout_s=timeout_s,
         )
     except (
         OSError,
@@ -756,6 +762,9 @@ def _run_tree_tn_control(
     seed: int,
     reference_energy: float | None,
     memory_sc_budget: float = _GTN_MEMORY_SC_BUDGET,
+    treesa_ntrials: int = 10,
+    treesa_niters: int = 50,
+    timeout_s: float = 600.0,
 ) -> TreeTensorControlResult | None:
     """Real tensor-network control via GenericTensorNetworks.jl.
 
@@ -772,7 +781,9 @@ def _run_tree_tn_control(
 
     repo_root = Path(__file__).resolve().parents[3]
     spec = _gtn_control_spec(ising_model, seed=seed, memory_sc_budget=memory_sc_budget)
-    payload = _run_gtn_control_oneshot(repo_root, spec)
+    spec["treesa_ntrials"] = treesa_ntrials
+    spec["treesa_niters"] = treesa_niters
+    payload = _run_gtn_control_oneshot(repo_root, spec, timeout_s=timeout_s)
 
     contraction_width = float(payload["contraction_width"])
     within_budget = bool(payload["within_budget"])
@@ -825,7 +836,9 @@ def _gtn_control_spec(
     }
 
 
-def _run_gtn_control_oneshot(repo_root: Path, spec: dict[str, object]) -> dict[str, Any]:
+def _run_gtn_control_oneshot(
+    repo_root: Path, spec: dict[str, object], *, timeout_s: float = 600.0
+) -> dict[str, Any]:
     driver_path = Path(__file__).with_name("gtn_control_driver.jl")
     project_path = repo_root / "julia"
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
@@ -850,7 +863,7 @@ def _run_gtn_control_oneshot(repo_root: Path, spec: dict[str, object]) -> dict[s
             capture_output=True,
             text=True,
             check=False,
-            timeout=600,
+            timeout=timeout_s,
         )
     finally:
         spec_path.unlink(missing_ok=True)

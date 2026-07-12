@@ -80,6 +80,8 @@ function process_spec(spec)
     time_tc_budget =
         haskey(spec, "time_tc_budget") ? Float64(spec["time_tc_budget"]) : 38.0
     seed = haskey(spec, "seed") ? Int(spec["seed"]) : 0
+    treesa_ntrials = haskey(spec, "treesa_ntrials") ? Int(spec["treesa_ntrials"]) : 10
+    treesa_niters = haskey(spec, "treesa_niters") ? Int(spec["treesa_niters"]) : 50
 
     interactions = spec["interactions"]
 
@@ -104,7 +106,9 @@ function process_spec(spec)
     # variation near the threshold is handled by the not-mps_easy guard on the
     # Python side, not by exact reproducibility here.
     Random.seed!(seed)
-    net = GenericTensorNetwork(problem; optimizer = TreeSA(ntrials = 10, niters = 50))
+    net = GenericTensorNetwork(
+        problem; optimizer = TreeSA(ntrials = treesa_ntrials, niters = treesa_niters)
+    )
     cc = contraction_complexity(net)
     sc = Float64(cc.sc)
     tc = Float64(cc.tc)

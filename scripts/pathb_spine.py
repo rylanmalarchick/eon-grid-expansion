@@ -131,8 +131,20 @@ def score_instance(
             ],
         }
     else:
+        # Large dense instances: TreeSA at full effort (10x50) exceeds the default
+        # 600s subprocess timeout from ~7000 edges up. Reduced effort still settles
+        # the budget question -- TreeSA reports an upper bound on the optimal
+        # width, and "the strong control failed to contract" (within_budget=False)
+        # is the operational tree-TN-negativity signal, not a width lower bound.
+        large = n > 60
         tree = run_tree_tn_control(
-            surrogate, seed=seed, reference_energy=reference, penalty_free=True
+            surrogate,
+            seed=seed,
+            reference_energy=reference,
+            penalty_free=True,
+            treesa_ntrials=3 if large else 10,
+            treesa_niters=20 if large else 50,
+            timeout_s=1800.0 if large else 600.0,
         )
 
     gap_open = layer_b.status != "OPTIMAL"
