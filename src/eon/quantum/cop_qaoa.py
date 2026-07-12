@@ -190,25 +190,29 @@ def run_constrained_qaoa_depths(
     energy_vector: np.ndarray | None = None,
 ) -> list[QAOARunResult]:
     """cop-QAOA at depths 1..p with per-depth angle optimization (the shared
-    grid+INTERP+Nelder-Mead schedule, same budget as the vanilla baseline)."""
+    grid+INTERP+Nelder-Mead schedule, same budget as the vanilla baseline).
+    Simulation is the exact numpy engine (simulator.py; Qiskit's Statevector
+    synthesizes the 2^n DiagonalGate and is intractable at n=20)."""
+    from eon.quantum.simulator import (
+        expected_energy_of_state,
+        sample_counts,
+        simulate_qaoa,
+    )
+
     energies = energy_vector if energy_vector is not None else _energy_vector(surrogate)
+    n = len(surrogate.variables)
+    initial = _uniform_weight_state(n, _target_hamming_weight(surrogate))
 
     def energy_fn(betas: tuple[float, ...], gammas: tuple[float, ...]) -> float:
-        circuit = build_constrained_qaoa_circuit(
-            surrogate, p=len(betas), betas=betas, gammas=gammas, energy_vector=energies
-        )
-        return expected_energy(surrogate, circuit, energy_vector=energies)
+        state = simulate_qaoa(initial, energies, betas, gammas, mixer="xy_ring")
+        return expected_energy_of_state(state, energies)
 
     results: list[QAOARunResult] = []
     for schedule in optimize_angles(energy_fn, p, nelder_mead_evals=nelder_mead_evals):
-        circuit = build_constrained_qaoa_circuit(
-            surrogate,
-            p=schedule.p,
-            betas=schedule.betas,
-            gammas=schedule.gammas,
-            energy_vector=energies,
+        state = simulate_qaoa(
+            initial, energies, schedule.betas, schedule.gammas, mixer="xy_ring"
         )
-        counts = dict(Statevector.from_instruction(circuit).sample_counts(shots))
+        counts = sample_counts(state, shots, seed=7 + schedule.p)
         decoded = decode_counts(surrogate, counts, total_shots=shots)
         best_sample = min(
             decoded,

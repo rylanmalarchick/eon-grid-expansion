@@ -29,6 +29,13 @@ from eon.quantum.angles import AngleSchedule, optimize_angles
 from eon.quantum.cop_qaoa import QAOARunResult
 from eon.quantum.energy import build_energy_vector
 from eon.quantum.postprocess import decode_counts
+from eon.quantum.simulator import (
+    expected_energy_of_state,
+    product_state,
+    sample_counts,
+    simulate_qaoa,
+    uniform_state,
+)
 from eon.validation import validate_finite_array
 
 
@@ -139,24 +146,29 @@ def run_penalty_qaoa(
     nelder_mead_evals: int = 60,
     relaxation_time_limit_s: float = 60.0,
     energies: np.ndarray | None = None,
+    seed: int = 7,
 ) -> list[QAOARunResult]:
     """Run vanilla (or warm-started) penalty-QAOA at depths 1..p; one
-    QAOARunResult per depth, angles from the shared optimizer."""
+    QAOARunResult per depth, angles from the shared optimizer. Simulation is
+    the exact numpy engine (simulator.py) -- Qiskit's Statevector synthesizes
+    the 2^n DiagonalGate and is intractable at n=20; the Qiskit circuit
+    builder above stays as the exportable artifact and small-n cross-check."""
     if energies is None:
         energies = build_energy_vector(surrogate)
     validate_finite_array(energies, name="penalty_qaoa_energy_vector")
+    n = len(surrogate.variables)
     thetas = None
     if warm_start:
         thetas = warm_start_thetas(
             solve_relaxation(surrogate, time_limit_s=relaxation_time_limit_s),
             epsilon=epsilon,
         )
+    mixer = "x" if thetas is None else "warm_start"
+    initial = uniform_state(n) if thetas is None else product_state(thetas)
 
     def energy_fn(betas: tuple[float, ...], gammas: tuple[float, ...]) -> float:
-        circuit = build_penalty_qaoa_circuit(
-            energies, p=len(betas), betas=betas, gammas=gammas, thetas=thetas
-        )
-        return expected_energy_from_vector(energies, circuit)
+        state = simulate_qaoa(initial, energies, betas, gammas, mixer=mixer, thetas=thetas)
+        return expected_energy_of_state(state, energies)
 
     schedules: list[AngleSchedule] = optimize_angles(
         energy_fn, p, nelder_mead_evals=nelder_mead_evals
@@ -164,14 +176,10 @@ def run_penalty_qaoa(
 
     results: list[QAOARunResult] = []
     for schedule in schedules:
-        circuit = build_penalty_qaoa_circuit(
-            energies,
-            p=schedule.p,
-            betas=schedule.betas,
-            gammas=schedule.gammas,
-            thetas=thetas,
+        state = simulate_qaoa(
+            initial, energies, schedule.betas, schedule.gammas, mixer=mixer, thetas=thetas
         )
-        counts = dict(Statevector.from_instruction(circuit).sample_counts(shots))
+        counts = sample_counts(state, shots, seed=seed + schedule.p)
         decoded = decode_counts(surrogate, counts, total_shots=shots)
         best_sample = min(
             decoded,
