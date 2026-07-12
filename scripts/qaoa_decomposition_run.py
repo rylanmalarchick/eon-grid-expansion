@@ -181,6 +181,7 @@ def main() -> None:
             shots=args.shots,
             gurobi_best_bound=ext_layer_b.best_bound,
         )
+        assert instance.planted_energy is not None  # fused instances always plant
         planted = float(instance.planted_energy)
         sandwich_ok = (
             ext_certificate.lower_bound <= planted + 1e-6
