@@ -237,7 +237,14 @@ def _energy_vector(surrogate: LayerBSurrogate) -> np.ndarray:
 
 
 def _target_hamming_weight(surrogate: LayerBSurrogate) -> int:
-    return min(surrogate.max_new_lines, max(1, surrogate.base_selected_count or 1))
+    # Capped at the variable count: decomposition blocks inherit the parent's
+    # max_new_lines / base_selected_count, which can exceed the block size (an
+    # empty fixed-weight subspace otherwise).
+    return min(
+        len(surrogate.variables),
+        surrogate.max_new_lines,
+        max(1, surrogate.base_selected_count or 1),
+    )
 
 
 def _uniform_weight_state(num_qubits: int, hamming_weight: int) -> np.ndarray:
