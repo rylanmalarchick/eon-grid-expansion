@@ -43,15 +43,16 @@ from eon.instances.hardness_classifier import (
 from eon.instances.scenarios import build_scenario_set
 from eon.quantum.cop_qaoa import (
     QAOARunResult,
-    build_constrained_qaoa_circuit,
-    expected_energy,
+    _target_hamming_weight,
+    _uniform_weight_state,
     run_constrained_qaoa_depths,
 )
 from eon.quantum.energy import build_energy_vector
-from eon.quantum.qaoa import (
-    build_penalty_qaoa_circuit,
-    expected_energy_from_vector,
-    run_penalty_qaoa,
+from eon.quantum.qaoa import run_penalty_qaoa
+from eon.quantum.simulator import (
+    expected_energy_of_state,
+    simulate_qaoa,
+    uniform_state,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -88,20 +89,21 @@ def _feasible_fraction(surrogate: LayerBSurrogate, counts: dict[str, int]) -> fl
 def _p1_grid(
     surrogate: LayerBSurrogate, energies: np.ndarray, *, algorithm: str
 ) -> dict[str, object]:
+    # numpy engine only: the Qiskit Statevector path is intractable at n=20
+    # (DiagonalGate synthesis; and initialize triggers an O(4^n) reset matrix).
+    n = len(surrogate.variables)
+    if algorithm == "cop":
+        initial = _uniform_weight_state(n, _target_hamming_weight(surrogate))
+        mixer = "xy_ring"
+    else:
+        initial = uniform_state(n)
+        mixer = "x"
     rows: list[list[float]] = []
     for beta in GRID_BETAS:
         row = []
         for gamma in GRID_GAMMAS:
-            if algorithm == "cop":
-                circuit = build_constrained_qaoa_circuit(
-                    surrogate, p=1, betas=(beta,), gammas=(gamma,), energy_vector=energies
-                )
-                row.append(expected_energy(surrogate, circuit, energy_vector=energies))
-            else:
-                circuit = build_penalty_qaoa_circuit(
-                    energies, p=1, betas=(beta,), gammas=(gamma,)
-                )
-                row.append(expected_energy_from_vector(energies, circuit))
+            state = simulate_qaoa(initial, energies, (beta,), (gamma,), mixer=mixer)
+            row.append(expected_energy_of_state(state, energies))
         rows.append(row)
     return {"betas": list(GRID_BETAS), "gammas": list(GRID_GAMMAS), "energies": rows}
 
@@ -150,6 +152,17 @@ def main() -> None:
     parser.add_argument("--seeds", default="7,24")
     parser.add_argument("--out", default="")
     parser.add_argument("--log-file", default="")
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Append to --out instead of truncating (crash resume; rerun only "
+        "the seeds/instances not yet recorded).",
+    )
+    parser.add_argument(
+        "--skip-planted",
+        action="store_true",
+        help="Skip the fused planted anchors (resume helper).",
+    )
     args = parser.parse_args()
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -205,12 +218,13 @@ def main() -> None:
         )
         logger.info("  layer A %s gap=%s", layer_a.termination_status, layer_a.mip_gap)
         jobs.append((f"ieee33:community_bridging:seed{seed}:n20", surrogate, True))
-    for n in (20, 24):
-        instance = generate_fused_planted(n, 7, block_size=10, alpha=0.1)
-        jobs.append((instance.name, build_external_surrogate(instance), False))
+    if not args.skip_planted:
+        for n in (20, 24):
+            instance = generate_fused_planted(n, 7, block_size=10, alpha=0.1)
+            jobs.append((instance.name, build_external_surrogate(instance), False))
 
     # --- run ---------------------------------------------------------------
-    with out_path.open("w") as out:
+    with out_path.open("a" if args.append else "w") as out:
         for instance_id, surrogate, constrained in jobs:
             logger.info("instance %s: building energy vector", instance_id)
             energies = build_energy_vector(surrogate)
