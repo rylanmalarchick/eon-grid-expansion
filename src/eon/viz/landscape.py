@@ -125,22 +125,53 @@ def plot_metric_vs_depth(
     # never carried by color alone or hidden by overplotting.
     dodge = {"cop": -0.07, "vanilla": 0.0, "vanilla_warm": 0.07}
     markers = {"cop": "o", "vanilla": "s", "vanilla_warm": "^"}
+    import matplotlib.transforms as mtransforms
+
     for axis, instance_id in zip(axes, instances, strict=True):
+        all_depths = sorted({p for pts in series[instance_id].values() for p, _ in pts})
         for algorithm in ("cop", "vanilla", "vanilla_warm"):
             points = sorted(series[instance_id].get(algorithm, []))
             if not points:
                 continue
-            depths = [p + dodge[algorithm] for p, _ in points]
-            values = [v for _, v in points]
-            axis.plot(
-                depths,
-                values,
-                color=ALGORITHM_COLORS[algorithm],
-                linewidth=2,
-                marker=markers[algorithm],
-                markersize=6,
-                label=ALGORITHM_LABELS[algorithm],
-            )
+            by_depth = dict(points)
+            # Never draw a line across a missing depth: a gap means "no
+            # feasible sample there", the WORST outcome, not missing-at-random.
+            # Split into runs of consecutive present depths.
+            segments: list[list[int]] = [[]]
+            for depth in all_depths:
+                if depth in by_depth:
+                    segments[-1].append(depth)
+                elif segments[-1]:
+                    segments.append([])
+            labeled = False
+            for segment in segments:
+                if not segment:
+                    continue
+                axis.plot(
+                    [p + dodge[algorithm] for p in segment],
+                    [by_depth[p] for p in segment],
+                    color=ALGORITHM_COLORS[algorithm],
+                    linewidth=2,
+                    marker=markers[algorithm],
+                    markersize=6,
+                    label=ALGORITHM_LABELS[algorithm] if not labeled else None,
+                )
+                labeled = True
+            missing = [p for p in all_depths if p not in by_depth]
+            if missing:
+                blended = mtransforms.blended_transform_factory(
+                    axis.transData, axis.transAxes
+                )
+                axis.scatter(
+                    [p + dodge[algorithm] for p in missing],
+                    [0.97] * len(missing),
+                    transform=blended,
+                    marker="x",
+                    s=45,
+                    color=ALGORITHM_COLORS[algorithm],
+                    linewidths=2,
+                    zorder=5,
+                )
         if logy:
             axis.set_yscale("symlog", linthresh=1e-3)
         axis.set_title(instance_id, color=_TEXT, fontsize=8)
@@ -174,6 +205,14 @@ def plot_metric_vs_depth(
         fontsize=8,
     )
     fig.suptitle(title, color=_TEXT, fontsize=10, y=1.10)
+    fig.text(
+        0.01,
+        -0.04,
+        "x at panel top = no feasible sample at that depth (worst outcome, "
+        "not missing data)",
+        color=_MUTED,
+        fontsize=7,
+    )
     fig.tight_layout()
     return _save(fig, out_stem)
 
