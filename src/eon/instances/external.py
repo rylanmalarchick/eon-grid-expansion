@@ -348,6 +348,8 @@ def generate_fused_planted(
     (unrestricted) clause pairs. The planted point stays the UNIQUE optimum:
     each R_i is block-minimal there and alpha * P > 0 strictly elsewhere.
     Smaller alpha is harder (arXiv:2411.03626 Gurobi results)."""
+    if n < 2:
+        raise ValueError(f"fused planting needs n >= 2, got {n}")
     if not 2 <= block_size <= _MAX_BLOCK_SIZE:
         raise ValueError(f"block_size must be in [2, {_MAX_BLOCK_SIZE}], got {block_size}")
     if alpha <= 0:
@@ -445,10 +447,11 @@ def generate_longrange_spin_glass(
         }
     else:
         edge_target = min(int(round(mean_degree * n / 2)), max_edges)
-        edges = set()
-        while len(edges) < edge_target:
-            i, j = rng.sample(range(n), 2)
-            edges.add((i, j) if i < j else (j, i))
+        # Bounded, deterministic-in-seed edge selection (a rejection loop has
+        # no header bound): shuffle all pairs, take the first edge_target.
+        all_pairs = [(i, j) for i in range(n) for j in range(i + 1, n)]
+        rng.shuffle(all_pairs)
+        edges = set(all_pairs[:edge_target])
 
     nonzero_choices: list[float] | None = None
     if coefficient_range is not None:

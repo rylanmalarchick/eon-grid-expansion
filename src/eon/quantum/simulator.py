@@ -89,6 +89,9 @@ def apply_xy_ring_mixer(state: np.ndarray, beta: float) -> np.ndarray:
     n = int(math.log2(len(state)))
     if n <= 1:
         return state
+    # _apply_xxplusyy writes through reshape/moveaxis views; copy once so the
+    # caller's array is never mutated (the other mixers already allocate).
+    state = state.copy()
     pairs = [(left, left + 1) for left in range(n - 1)] + [(n - 1, 0)]
     for a, b in pairs:
         state = _apply_xxplusyy(state, a, b, beta)

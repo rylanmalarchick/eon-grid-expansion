@@ -79,8 +79,10 @@ def optimize_angles(
         previous = schedules[-1]
         evaluations = 0
         # Two starts: INTERP, and zero-padding (an identity extra layer, which
-        # reproduces the depth-(p-1) state EXACTLY -- this is what makes the
-        # final schedule monotone in depth by construction).
+        # reproduces the depth-(p-1) state -- exactly for the X / XY-ring
+        # mixers, to machine epsilon for the warm-start mixer whose beta=0
+        # gate is ry(t) @ ry(-t); keep-best makes the schedule monotone in
+        # depth up to that epsilon).
         starts = [
             (_interp(previous.betas, depth), _interp(previous.gammas, depth)),
             ((*previous.betas, 0.0), (*previous.gammas, 0.0)),

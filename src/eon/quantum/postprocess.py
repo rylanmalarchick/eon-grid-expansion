@@ -43,7 +43,7 @@ def decode_counts(
         bitstring = raw_bitstring[::-1]
         actual_builds = {
             variable.name: int(bit)
-            for variable, bit in zip(surrogate.variables, bitstring, strict=False)
+            for variable, bit in zip(surrogate.variables, bitstring, strict=True)
         }
         selected_count = sum(actual_builds.values()) + sum(
             value
