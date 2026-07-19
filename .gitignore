@@ -33,3 +33,4 @@ julia/*.cov
 *.api_key
 ibm_token*
 iqm_token*
+experiments/figures/
