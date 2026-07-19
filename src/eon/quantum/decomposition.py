@@ -35,6 +35,11 @@ class DecompositionCertificate:
     dropped_coupling_count: int
     dropped_coupling_bound: float
     gurobi_best_bound: float | None
+    # Transparency: the greedy cardinality repair can override block-QAOA
+    # outputs; these fields say whether it fired and how many variable builds
+    # it changed, so "reaggregated from per-block QAOA" is never overstated.
+    repair_applied: bool = False
+    builds_changed_by_repair: int = 0
 
 
 def decompose_surrogate(
@@ -125,23 +130,45 @@ def solve_decomposed_qaoa(
     """Per-block constrained QAOA -> merge -> greedy cardinality repair ->
     rescore on the FULL surrogate objective (upper bound) + D14 certificate."""
     blocks = decompose_surrogate(surrogate, block_size=block_size)
-    combined_builds = {
+    outside_fixed = {
         name: value
         for name, value in surrogate.fixed_builds.items()
         if name not in surrogate.variable_names
     }
+    variable_builds: dict[str, int] = {}
     for subproblem in blocks:
         run = run_constrained_qaoa_subproblem(subproblem, p=p, shots=shots)
-        combined_builds.update(run.best_sample.actual_builds)
+        variable_builds.update(run.best_sample.actual_builds)
 
-    if sum(combined_builds.values()) > surrogate.max_new_lines:
-        ranked = sorted(
-            combined_builds.items(),
-            key=lambda item: surrogate.linear.get(item[0], 0.0),
+    # Greedy cardinality repair over VARIABLE builds only -- Layer-A-fixed
+    # lines outside the surrogate are never touched (unbuilding one is not a
+    # legal move, and the surrogate coefficients are conditional on them).
+    # Ranking is in BUILD space: the objective delta of build=1 vs build=0 is
+    # +linear for default 0 (toggle 0->1) and -linear for default 1 (toggle
+    # 1->0); keep the most beneficial builds within the remaining budget.
+    defaults = {variable.name: variable.default_value for variable in surrogate.variables}
+    variable_budget = surrogate.max_new_lines - sum(outside_fixed.values())
+    repair_applied = False
+    builds_changed = 0
+    if sum(variable_builds.values()) > variable_budget:
+        repair_applied = True
+
+        def build_delta(name: str) -> float:
+            coefficient = surrogate.linear.get(name, 0.0)
+            return coefficient if defaults.get(name, 0) == 0 else -coefficient
+
+        built = sorted(
+            (name for name, value in variable_builds.items() if value),
+            key=build_delta,
         )
-        keep = {name for name, _ in ranked[: surrogate.max_new_lines]}
-        combined_builds = {name: int(name in keep) for name in combined_builds}
+        keep = set(built[: max(0, variable_budget)])
+        repaired = {name: int(name in keep) for name in variable_builds}
+        builds_changed = sum(
+            1 for name in variable_builds if repaired[name] != variable_builds[name]
+        )
+        variable_builds = repaired
 
+    combined_builds = {**outside_fixed, **variable_builds}
     toggle_decisions = {
         variable.name: variable.default_value ^ combined_builds.get(variable.name, 0)
         for variable in surrogate.variables
@@ -170,6 +197,8 @@ def solve_decomposed_qaoa(
         dropped_coupling_count=dropped_count,
         dropped_coupling_bound=block_bound,
         gurobi_best_bound=gurobi_best_bound,
+        repair_applied=repair_applied,
+        builds_changed_by_repair=builds_changed,
     )
     selected_candidates = tuple(
         sorted(name for name, selected in combined_builds.items() if selected)
