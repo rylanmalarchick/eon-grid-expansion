@@ -103,7 +103,8 @@ def main() -> None:
                         "mps_easy": coupling.mps_easy,
                     }
                     ok += 1
-                except Exception as exc:  # noqa: BLE001 -- long run must record and continue
+                # Broad catch: a long run must record the failure and continue.
+                except Exception as exc:
                     logger.exception("run failed: %s %s seed=%d rep=%d", feeder, family, seed, rep)
                     record = {
                         "feeder": feeder,

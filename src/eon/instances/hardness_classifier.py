@@ -323,7 +323,7 @@ def classify_default_instance_zoo(
                         np.asarray(objective_vector, dtype=float),
                         name=f"{feeder}_{family}_{repeat_index}_objective_vector",
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     # Deliberate broad catch: this is a sweep over many independent
                     # solver invocations (Gurobi, agentbible, MPS, numpy), any of which
                     # can fail in unrelated ways. A missed exception type would abort the

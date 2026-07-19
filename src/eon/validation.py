@@ -287,7 +287,7 @@ def _run_checks(value: ArrayLike, specs: list[_CheckSpec], *, name: str) -> None
     for spec in specs:
         try:
             spec.validator(value, name=name, strict=True, **spec.validator_kwargs)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # Deliberate broad catch: record a failed CheckResult for provenance
             # regardless of which validator failed, then re-raise. The root cause is
             # preserved by the bare `raise` below, so nothing is swallowed.
