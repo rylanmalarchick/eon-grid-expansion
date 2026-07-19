@@ -85,6 +85,9 @@ def test_generators_deterministic_in_seed() -> None:
     a = generate_fused_planted(20, seed=42, block_size=5)
     b = generate_fused_planted(20, seed=42, block_size=5)
     assert a == b
+    p1 = generate_posiform_planted(12, seed=42)
+    p2 = generate_posiform_planted(12, seed=42)
+    assert p1 == p2
     g1 = generate_longrange_spin_glass(30, seed=11)
     g2 = generate_longrange_spin_glass(30, seed=11)
     assert g1 == g2

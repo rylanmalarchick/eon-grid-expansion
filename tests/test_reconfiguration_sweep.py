@@ -72,19 +72,19 @@ def _fake_mps(p: int) -> SimpleNamespace:
 def patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     calls: dict[str, list] = {"build": [], "mps": [], "layer_b": [], "tree": []}
 
-    def fake_build(net, scenarios, config, **kwargs):  # noqa: ANN001
+    def fake_build(net, scenarios, config, **kwargs):
         calls["build"].append(kwargs["seed"])
         return ([], _fake_layer_a(), object())
 
-    def fake_layer_b(surrogate, **kwargs):  # noqa: ANN001
+    def fake_layer_b(surrogate, **kwargs):
         calls["layer_b"].append(kwargs)
         return _fake_layer_b()
 
-    def fake_mps_protocol(surrogate, **kwargs):  # noqa: ANN001
+    def fake_mps_protocol(surrogate, **kwargs):
         calls["mps"].append(kwargs["qaoa_rounds"])
         return _fake_mps(kwargs["qaoa_rounds"])
 
-    def fake_tree_control(surrogate, **kwargs):  # noqa: ANN001
+    def fake_tree_control(surrogate, **kwargs):
         calls["tree"].append(kwargs)
         return _fake_tree()
 
@@ -130,7 +130,7 @@ def test_p_list_sweeps_on_one_surrogate(patched: dict[str, list]) -> None:
 
 
 def test_record_schema_matches_prior_runs(patched: dict[str, list]) -> None:
-    (record,) = _run(patched, with_mps=True, p_list=[2])
+    (record,) = _run(patched, with_mps=True, p_list=[3])
     assert set(record) == {
         "instance_id",
         "feeder",
@@ -148,8 +148,8 @@ def test_record_schema_matches_prior_runs(patched: dict[str, list]) -> None:
         "signals",
         "run",
     }
-    assert record["run"]["qaoa_rounds"] == 2
-    assert record["mps"]["orderings"][0]["chi_curve"] == {"4": 8.0, "64": 8.0}
+    assert record["run"]["qaoa_rounds"] == 3
+    assert record["mps"]["orderings"][0]["chi_curve"] == {"4": 8.0, "64": 9.0}
 
 
 def test_no_mps_yields_single_record_with_null_p(patched: dict[str, list]) -> None:

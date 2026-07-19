@@ -292,7 +292,8 @@ def main() -> None:
                     run_meta=run_meta,
                 )
                 ok += 1
-            except Exception as exc:  # noqa: BLE001 -- long sweep must record and continue
+            # Broad catch: a long sweep must record the failure and continue.
+            except Exception as exc:
                 logger.exception("instance failed: %s", instance.name)
                 record = {
                     "instance_id": instance.name,

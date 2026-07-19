@@ -148,10 +148,10 @@ def test_optimizer_monotone_in_depth_on_toy() -> None:
 
     schedules = optimize_angles(energy_fn, 3, nelder_mead_evals=40)
     assert [s.p for s in schedules] == [1, 2, 3]
-    # Monotone in depth BY CONSTRUCTION: the zero-padded start reproduces the
-    # previous depth's state exactly and keep-best never regresses from it.
-    assert schedules[1].expected_energy <= schedules[0].expected_energy + 1e-6
-    assert schedules[2].expected_energy <= schedules[1].expected_energy + 1e-6
+    # Monotone in depth by construction for the X mixer (zero-pad start is an
+    # exact FP identity here); pin tight -- this quantity is deterministic.
+    assert schedules[1].expected_energy <= schedules[0].expected_energy + 1e-12
+    assert schedules[2].expected_energy <= schedules[1].expected_energy + 1e-12
 
 
 def test_run_penalty_qaoa_returns_per_depth_results() -> None:
