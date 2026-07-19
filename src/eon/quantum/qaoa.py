@@ -179,7 +179,10 @@ def run_penalty_qaoa(
         state = simulate_qaoa(
             initial, energies, schedule.betas, schedule.gammas, mixer=mixer, thetas=thetas
         )
-        counts = sample_counts(state, shots, seed=seed + schedule.p)
+        # Distinct sampling stream per (instance seed, algorithm, depth); cop
+        # uses salt 0 in run_constrained_qaoa_depths.
+        salt = 2 if warm_start else 1
+        counts = sample_counts(state, shots, seed=(seed * 3 + salt) * 101 + schedule.p)
         decoded = decode_counts(surrogate, counts, total_shots=shots)
         best_sample = min(
             decoded,

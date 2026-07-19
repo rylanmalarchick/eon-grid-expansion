@@ -133,9 +133,10 @@ def solve_qubo_with_neal(
     compilation: QuboCompilation,
     *,
     num_reads: int = 256,
+    seed: int = 7,
 ) -> LayerBSolution:
     sampler = neal.SimulatedAnnealingSampler()
-    sampleset = sampler.sample_qubo(compilation.qubo, num_reads=num_reads)
+    sampleset = sampler.sample_qubo(compilation.qubo, num_reads=num_reads, seed=seed)
     best_solution: LayerBSolution | None = None
 
     for sample, energy in sampleset.data(fields=["sample", "energy"]):

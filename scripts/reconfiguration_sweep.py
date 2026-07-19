@@ -166,6 +166,12 @@ def run_instance(
                 for o in mps.ordering_results
             ],
             "ordering_gaps_vs_reference": [_finite(g) for g in ordering_gaps],
+            # The reference is the UNPENALIZED Layer-B objective; MPS/TN
+            # energies are of the Hess-PENALIZED compiled QUBO, whose exact
+            # ground sits one penalty unit above the reference. Quote gaps vs
+            # tree_tn.exact_ground_energy (same compiled object), not this.
+            "reference_caveat": "reference is unpenalized Layer B; compare vs "
+            "tree_tn.exact_ground_energy for same-object gaps",
         }
         yield _make_record(
             instance_id,
@@ -384,7 +390,8 @@ def main() -> None:
                         signal_block.get("tree_negative_candidate"),
                     )
                 ok += 1
-            except Exception as exc:  # noqa: BLE001 -- long sweep must record and continue
+            # Broad catch: a long sweep must record the failure and continue.
+            except Exception as exc:
                 logger.exception("instance failed: %s %s seed=%d", feeder, family, seed)
                 error_record = {
                     "instance_id": f"{feeder}:{family}:seed{seed}",

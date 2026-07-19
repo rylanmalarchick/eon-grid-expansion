@@ -69,13 +69,13 @@ ${PY} scripts/qaoa_decomposition_run.py --time-limit "${LAYER_A_LIMIT}" \
   --block-size 10 --p 1 --out "${OUT}/decomposition.jsonl"
 
 echo "== 5/6 scale-tier MPS sweep"
-${PY} scripts/scale_mps_sweep.py --sizes "${MPS_SIZES}" --seeds 7 \
-  --chi-values "${MPS_CHI}" --gurobi-time-limit "${GLASS_LIMIT}" \
+${PY} scripts/scale_mps_sweep.py --sizes "${MPS_SIZES}" --seeds 7,24 \
+  --chi-values "${MPS_CHI}" --gurobi-time-limit 600 \
   --out "${OUT}/scale_mps.jsonl"
 
 echo "== 6/6 congestion metrics + figures"
 ${PY} scripts/congestion_metrics.py --time-limit "${LAYER_A_LIMIT}" \
-  --eval-time-limit "${LAYER_A_LIMIT}" --seed 7 --out "${OUT}/congestion.json"
+  --eval-time-limit 600 --seed 7 --out "${OUT}/congestion.json"
 ${PY} scripts/make_landscape_figure.py --results "${OUT}/landscape.jsonl" \
   --out-dir "${OUT}/figures"
 

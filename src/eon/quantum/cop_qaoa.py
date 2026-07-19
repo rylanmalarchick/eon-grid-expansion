@@ -188,6 +188,7 @@ def run_constrained_qaoa_depths(
     shots: int = 1024,
     nelder_mead_evals: int = 60,
     energy_vector: np.ndarray | None = None,
+    seed: int = 7,
 ) -> list[QAOARunResult]:
     """cop-QAOA at depths 1..p with per-depth angle optimization (the shared
     grid+INTERP+Nelder-Mead schedule, same budget as the vanilla baseline).
@@ -212,7 +213,9 @@ def run_constrained_qaoa_depths(
         state = simulate_qaoa(
             initial, energies, schedule.betas, schedule.gammas, mixer="xy_ring"
         )
-        counts = sample_counts(state, shots, seed=7 + schedule.p)
+        # Sampling stream is distinct per (instance seed, algorithm, depth):
+        # salt 0 = cop; vanilla/warm use salts 1/2 in qaoa.run_penalty_qaoa.
+        counts = sample_counts(state, shots, seed=(seed * 3 + 0) * 101 + schedule.p)
         decoded = decode_counts(surrogate, counts, total_shots=shots)
         best_sample = min(
             decoded,

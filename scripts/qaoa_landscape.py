@@ -185,7 +185,7 @@ def main() -> None:
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
 
     # --- assemble instances -------------------------------------------------
-    jobs: list[tuple[str, LayerBSurrogate, bool]] = []  # (id, surrogate, constrained)
+    jobs: list[tuple[str, LayerBSurrogate, bool, int]] = []  # (id, surrogate, constrained, seed)
     scenarios = build_scenario_set(SCENARIO_KIND)
     net = load_distribution_feeder("ieee33")
     baseline_stress = _compute_baseline_stress(
@@ -217,18 +217,29 @@ def main() -> None:
             baseline_stress=baseline_stress,
         )
         logger.info("  layer A %s gap=%s", layer_a.termination_status, layer_a.mip_gap)
-        jobs.append((f"ieee33:community_bridging:seed{seed}:n20", surrogate, True))
+        jobs.append((f"ieee33:community_bridging:seed{seed}:n20", surrogate, True, seed))
     if not args.skip_planted:
         for n in (20, 24):
             instance = generate_fused_planted(n, 7, block_size=10, alpha=0.1)
-            jobs.append((instance.name, build_external_surrogate(instance), False))
+            jobs.append((instance.name, build_external_surrogate(instance), False, 7))
 
     # --- run ---------------------------------------------------------------
     with out_path.open("a" if args.append else "w") as out:
-        for instance_id, surrogate, constrained in jobs:
+        for instance_id, surrogate, constrained, instance_seed in jobs:
             logger.info("instance %s: building energy vector", instance_id)
             energies = build_energy_vector(surrogate)
             exact_optimum = float(energies.min())
+            # The big-M cardinality penalty is a single flat addend, not scaled
+            # by violation size, so assert the argmin really is feasible before
+            # using it as the exact reference for every excess metric.
+            argmin = int(np.argmin(energies))
+            argmin_builds = sum((argmin >> i) & 1 for i in range(len(surrogate.variables)))
+            if argmin_builds > surrogate.max_new_lines:
+                raise SystemExit(
+                    f"{instance_id}: energy-vector argmin is infeasible "
+                    f"({argmin_builds} builds > {surrogate.max_new_lines}); the flat "
+                    "penalty is too small for this instance -- excess metrics would lie"
+                )
             algorithms: list[tuple[str, list[QAOARunResult]]] = []
             if constrained:
                 logger.info("  cop-QAOA depths 1..%d", args.depth)
@@ -241,6 +252,7 @@ def main() -> None:
                             shots=args.shots,
                             nelder_mead_evals=args.nm_evals,
                             energy_vector=energies,
+                            seed=instance_seed,
                         ),
                     )
                 )
@@ -254,6 +266,7 @@ def main() -> None:
                         shots=args.shots,
                         nelder_mead_evals=args.nm_evals,
                         energies=energies,
+                        seed=instance_seed,
                     ),
                 )
             )
@@ -268,6 +281,7 @@ def main() -> None:
                         warm_start=True,
                         nelder_mead_evals=args.nm_evals,
                         energies=energies,
+                        seed=instance_seed,
                     ),
                 )
             )
