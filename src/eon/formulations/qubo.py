@@ -57,10 +57,15 @@ def compile_layer_b_qubo(
             penalty_strength=penalty_strength,
         )
     elif method == "hess_slack_free" and remaining_budget <= 5:
-        # Hess-style at-most-K: dense quadratic cardinality penalty
-        # Penalizes (sum_i actual_build_i - K)_+^2 via a shifted (sum - K)^2 penalty
-        # that only activates when sum > K. This produces O(n^2) pairwise couplings
-        # which is what makes the QUBO hard for MPS on non-1D graphs.
+        # Hess-style dense quadratic cardinality penalty. NOTE: this is a
+        # plain (sum - K)^2 penalty -- EQUALITY-BIASED, not one-sided: it also
+        # penalizes building fewer than K lines, so a constrained optimum with
+        # s* < K carries penalty*(K-s*)^2 in the compiled QUBO (the +50000
+        # offset on the IEEE 33 records; root-caused 2026-07-31) and the
+        # compiled argmin can differ from the at-most-K optimum (see
+        # tests/test_hess_penalty_offset.py). Comparisons must stay within one
+        # compiled object. The O(n^2) pairwise couplings it produces are what
+        # densify the coupling graph.
         offset = _apply_hess_at_most_k_penalty(
             qubo,
             offset,
@@ -238,9 +243,12 @@ def _apply_hess_at_most_k_penalty(
     max_builds: int,
     penalty_strength: float,
 ) -> float:
-    """At-most-K penalty via Hess-style dense quadratic cardinality encoding.
+    """Cardinality penalty via Hess-style dense quadratic encoding.
 
-    Encodes penalty_strength * max(0, sum(actual_builds) - K)^2 as a QUBO.
+    Encodes penalty_strength * (sum(actual_builds) - K)^2 as a QUBO -- a plain
+    squared deviation, EQUALITY-BIASED (underbuilding is penalized too; there
+    is no max(0, .)). See tests/test_hess_penalty_offset.py for the exact
+    ground-state semantics this implies.
     Uses (sum_i a_i - K)^2 = sum_i a_i^2 + 2*sum_{i<j} a_i*a_j - 2K*sum_i a_i + K^2
     where a_i = constant_i + linear_i * x_i is the affine build expression.
 
