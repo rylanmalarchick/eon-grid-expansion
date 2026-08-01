@@ -113,7 +113,12 @@ function entanglement_entropy(psi::MPS, bond::Int)
     _, svals, _ = svd(psi_bond[bond], row_inds)
     entropy_value = 0.0
     for idx in 1:dim(svals, 1)
-        probability = abs2(svals[idx, idx])
+        # Clamp to [0, 1]: truncation float error can give abs2(sval) = 1 + eps,
+        # whose -p*log(p) term is NEGATIVE (~ -eps) and trips the strict
+        # non-negativity validation on the whole profile (the 2026-07-31
+        # scale-sweep fast-fail root cause). A probability > 1 is pure float
+        # noise for a normalized state; the validation itself stays strict.
+        probability = min(abs2(svals[idx, idx]), 1.0)
         if probability > 1e-12
             entropy_value -= probability * log(probability)
         end
