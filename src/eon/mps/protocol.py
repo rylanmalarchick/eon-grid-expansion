@@ -38,6 +38,9 @@ _COEFF_ZERO_ATOL = 1e-12
 _JULIQAOA_WORKER: _JuliQAOAWorker | None = None
 _logger = logging.getLogger(__name__)
 
+# Brute-force enumeration ceiling for the exact fallback (2^24 states).
+_EXACT_FALLBACK_MAX_QUBITS = 24
+
 
 class JuliQAOATransportError(RuntimeError):
     pass
@@ -241,7 +244,26 @@ def run_mps_protocol(
         JuliQAOABackendError,
         subprocess.SubprocessError,
         json.JSONDecodeError,
-    ):
+    ) as exc:
+        n = len(ising_model.variable_names)
+        if n > _EXACT_FALLBACK_MAX_QUBITS:
+            # No honest fallback exists above the brute-force limit: the old
+            # path substituted reference_energy into every curve, fabricating
+            # excess-0 "results" (5/6 scale-sweep records, 2026-07-21).
+            raise JuliQAOABackendError(
+                f"JuliQAOA backend failed for {instance_name} (n={n}) and no "
+                f"exact fallback exists above {_EXACT_FALLBACK_MAX_QUBITS} "
+                f"qubits; underlying error: {type(exc).__name__}: {exc}"
+            ) from exc
+        _logger.warning(
+            "JuliQAOA backend failed for %s (%s: %s); degrading to exact "
+            "brute-force fallback (n=%d <= %d).",
+            instance_name,
+            type(exc).__name__,
+            exc,
+            n,
+            _EXACT_FALLBACK_MAX_QUBITS,
+        )
         result = _exact_fallback_protocol(
             compilation,
             ising_model,
@@ -941,7 +963,7 @@ def _exact_fallback_protocol(
 
 
 def _exact_qubo_ground_energy(compilation: QuboCompilation, variable_count: int) -> float:
-    if variable_count > 24:
+    if variable_count > _EXACT_FALLBACK_MAX_QUBITS:
         return float("nan")
     coefficients = [
         (_toggle_index(left), _toggle_index(right), coefficient)
