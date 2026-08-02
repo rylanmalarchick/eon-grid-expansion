@@ -120,6 +120,22 @@ def _completeness(entry: BibEntry) -> tuple[int, int]:
     return has_real_title, len(entry.note)
 
 
+def normalize_authors(raw: str) -> str:
+    """Join a surname list with BibTeX's " and " separator.
+
+    The reading list writes authors as "A, B, C"; BibTeX reads a comma as a
+    "Last, First" separator and mangles that into one malformed name. Forms
+    already using "and", and "et al." shorthand, pass through.
+    """
+    cleaned = raw.strip().rstrip(",")
+    if not cleaned or "et al." in cleaned:
+        return cleaned
+    parts = [part.strip() for part in cleaned.split(",") if part.strip()]
+    if len(parts) <= 1:
+        return cleaned
+    return " and ".join(parts)
+
+
 def _is_continuation(line: str, entry_indent: int) -> bool:
     """A wrapped line of the current entry: indented deeper than the key."""
     stripped = line.lstrip()
@@ -134,7 +150,7 @@ def _build_entry(key: str, body: str) -> BibEntry | None:
     if title_match is None and arxiv_match is None and doi_match is None:
         return None
 
-    authors = body.split("(")[0].strip().rstrip(",")
+    authors = normalize_authors(body.split("(")[0])
     title = title_match.group(1).strip().rstrip(",") if title_match else key
     return BibEntry(
         key=key,

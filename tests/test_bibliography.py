@@ -130,3 +130,24 @@ def test_cross_references_do_not_create_duplicate_keys() -> None:
     # The surviving R5 must be the real definition, not the cross-reference.
     by_key = {entry.key: entry for entry in entries}
     assert "Intractable Decathlon" in by_key["R5"].title
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # BibTeX reads a comma as "Last, First"; a comma-separated surname list
+        # is therefore mangled unless it is joined with " and ".
+        ("Baertschi, Eidenbenz", "Baertschi and Eidenbenz"),
+        (
+            "Ellinas, Chevalier, Chatzivasileiadis",
+            "Ellinas and Chevalier and Chatzivasileiadis",
+        ),
+        ("Lazo and Watts", "Lazo and Watts"),
+        ("Cuenca et al.", "Cuenca et al."),
+        ("Koch et al.", "Koch et al."),
+    ],
+)
+def test_author_lists_use_bibtex_and_separator(raw: str, expected: str) -> None:
+    from eon.bibliography import normalize_authors
+
+    assert normalize_authors(raw) == expected
