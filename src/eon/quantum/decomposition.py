@@ -115,7 +115,14 @@ def dropped_coupling_lower_bound(
     """LB = offset + sum_b exact block minimum + sum over dropped couplings of
     min(0, J). Valid because toggle variables are binary (each dropped term is
     at least min(0, J)) and dropping the cardinality constraint only lowers
-    block minima. Returns (bound, dropped_coupling_count)."""
+    block minima. Returns (bound, dropped_coupling_count).
+
+    MACHINE-CHECKED: lean/DroppedCouplingBound.lean proves this bound never
+    exceeds the energy of any assignment (over Int; the argument is
+    ordered-ring generic). tests/test_dropped_coupling_bound.py brute-forces
+    the same statement against the true minimum on small instances, with a
+    negative control showing the min(0, J) floor is load-bearing.
+    """
     in_block: set[tuple[str, str]] = set()
     for block in blocks:
         in_block.update(block.quadratic.keys())
