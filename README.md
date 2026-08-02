@@ -12,11 +12,16 @@ pytest -q tests/                      # full suite; no solver licence needed
 python scripts/qiskit_validation.py   # runs the quantum path end to end
 ```
 
-The package installs and imports **without** a Gurobi licence and without the
-local provenance library, so the model can be inspected before either is
-obtained. Validation still runs in that configuration — the numerical checks are
-the same, only provenance recording degrades to a warning. Anything that needs
-Gurobi says so and fails with a clear message rather than a stack trace.
+The only optional dependency is Gurobi. Without a licence the package still
+installs, imports, and runs its full non-solver suite; the Layer A tests skip
+with a named reason rather than failing, so the summary shows exactly what did
+not run. Anything that needs Gurobi says so with a clear message rather than a
+stack trace.
+
+There are no dependencies outside the public indexes. Numerical validation and
+provenance recording live in `eon._checks`; the Julia drivers carry their own
+inlined checks. Both used to come from a local package pinned by absolute path,
+which meant nobody but its author could run them.
 
 ## The two layers
 

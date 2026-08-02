@@ -11,64 +11,28 @@ from typing import Any
 
 from numpy.typing import ArrayLike
 
-# agentbible is the provenance backbone (D9), developed locally and not
-# installable from an index -- so an external reviewer cannot get it. Import it
-# when present, otherwise fall back to stand-ins that STILL VALIDATE and only
-# drop provenance recording. A no-op fallback would leave a green suite proving
-# nothing.
-try:
-    from agentbible import (
-        DEFAULT_ATOL,
-        DEFAULT_RTOL,
-        check_finite_array,
-        check_hermitian,
-        check_non_negative_array,
-        check_normalized_l1,
-        check_positive_semidefinite,
-        check_probability_array,
-        check_symmetric,
-        check_unitary,
-    )
-    from agentbible.provenance import (
-        CheckResult,
-        build_provenance_record,
-        get_provenance_metadata,
-    )
-
-    AGENTBIBLE_AVAILABLE = True
-except ModuleNotFoundError:  # pragma: no cover - exercised in a clean env
-    import warnings
-
-    # Signatures are compatible at the call sites used here; mypy checks the
-    # agentbible branch, which is the one present in the development env.
-    from eon._validation_fallback import (  # type: ignore[assignment]
-        DEFAULT_ATOL,
-        DEFAULT_RTOL,
-        CheckResult,
-        build_provenance_record,
-        check_finite_array,
-        check_hermitian,
-        check_non_negative_array,
-        check_normalized_l1,
-        check_positive_semidefinite,
-        check_probability_array,
-        check_symmetric,
-        check_unitary,
-        get_provenance_metadata,
-    )
-
-    AGENTBIBLE_AVAILABLE = False
-    warnings.warn(
-        "agentbible not installed: numerical validation still runs, but "
-        "provenance records are not written. Install it for the full "
-        "reproducibility trail.",
-        RuntimeWarning,
-        stacklevel=2,
-    )
+# Numerical checks and provenance recording. These used to come from a local
+# package that was not installable from any index, so an external reviewer could
+# not run the suite; the implementation now lives in this repository.
+from eon._checks import (
+    DEFAULT_ATOL,
+    DEFAULT_RTOL,
+    CheckResult,
+    build_provenance_record,
+    check_finite_array,
+    check_hermitian,
+    check_non_negative_array,
+    check_normalized_l1,
+    check_positive_semidefinite,
+    check_probability_array,
+    check_symmetric,
+    check_unitary,
+    get_provenance_metadata,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RESULTS_ROOT = _REPO_ROOT / "experiments" / "results"
-_FINDINGS_ROOT = _REPO_ROOT / "experiments" / "logs" / "agentbible_findings"
+_FINDINGS_ROOT = _REPO_ROOT / "experiments" / "logs" / "findings"
 _RUN_ID = os.environ.get("EON_RUN_ID") or datetime.now(UTC).strftime(
     "%Y%m%dT%H%M%SZ"
 )
@@ -78,7 +42,6 @@ _PROVENANCE_PATH = Path(
         str(_RESULTS_ROOT / _RUN_ID / "provenance.jsonl"),
     )
 )
-_AGENTBIBLE_JULIA_PATH = Path.home() / "dev" / "oss" / "agentbible" / "languages" / "julia"
 _PROVENANCE_LOCK = threading.Lock()
 _BASE_METADATA = get_provenance_metadata(
     description="EON numerical validation",
@@ -102,11 +65,7 @@ def provenance_path() -> Path:
     return _PROVENANCE_PATH
 
 
-def agentbible_julia_path() -> Path:
-    return _AGENTBIBLE_JULIA_PATH
-
-
-def write_agentbible_finding(name: str, body: str) -> Path:
+def write_finding(name: str, body: str) -> Path:
     _FINDINGS_ROOT.mkdir(parents=True, exist_ok=True)
     target = _FINDINGS_ROOT / name
     target.write_text(body.rstrip() + "\n", encoding="utf-8")

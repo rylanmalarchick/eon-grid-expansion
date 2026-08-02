@@ -1,13 +1,12 @@
-"""Pure-numpy stand-ins used when the local `agentbible` package is absent.
+"""Numerical checks and provenance records.
 
-agentbible is the provenance backbone (PLAN.txt D9) and is developed locally,
-so an external reviewer cannot `pip install` it. Without a fallback the package
-does not import at all, which makes the whole reproducibility claim untestable
-by the people we are asking to check it.
+These were originally a thin wrapper over a local package that could not be
+installed from any index, which meant an external reviewer could not run the
+validation at all. The implementation now lives here.
 
-The important property: these stand-ins STILL VALIDATE. Only provenance
-recording degrades. Substituting no-op checkers would leave a green suite that
-proves nothing -- the exact failure this project has already been burned by.
+The checks RAISE. Nothing here is a no-op: a stand-in that quietly passed would
+leave a green suite proving nothing, which is the failure this project has been
+burned by before.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ class CheckResult:
 
 @dataclass(frozen=True, slots=True)
 class _Record:
-    """Mirrors agentbible's record interface (callers use .to_dict())."""
+    """Callers use .to_dict() to serialise a run's checks."""
 
     payload: dict[str, Any] = field(default_factory=dict)
 
@@ -43,13 +42,14 @@ class _Record:
 
 
 def get_provenance_metadata(**_: Any) -> dict[str, Any]:
-    """No hardware/package census without agentbible; the marker says so."""
-    return {"provenance": "unavailable", "reason": "agentbible not installed"}
+    """Run metadata. No hardware or package census is collected -- records say
+    what was checked and whether it passed, not what machine it ran on."""
+    return {"provenance": "inline"}
 
 
 def build_provenance_record(**kwargs: Any) -> _Record:
     record = dict(kwargs)
-    record["provenance_backend"] = "fallback"
+    record["provenance_backend"] = "inline"
     checks = record.get("checks_passed") or []
     record["checks_passed"] = [
         {

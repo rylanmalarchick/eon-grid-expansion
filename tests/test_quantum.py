@@ -1,3 +1,5 @@
+import pytest
+
 from eon.formulations.layer_b import build_layer_b_surrogate
 from eon.formulations.lindistflow import ExpansionProblemConfig, solve_lindistflow_expansion
 from eon.instances.candidate_lines import generate_candidate_lines
@@ -6,6 +8,7 @@ from eon.instances.scenarios import build_phase1_scenarios
 from eon.quantum.cop_qaoa import build_p1_landscape, run_constrained_qaoa_subproblem
 
 
+@pytest.mark.requires_gurobi
 def test_constrained_qaoa_smoke_runs() -> None:
     net = load_distribution_feeder("ieee33")
     scenarios = build_phase1_scenarios()

@@ -15,8 +15,71 @@
 #
 # Same JSON-in/JSON-out contract and provenance discipline as juliqaoa_driver.jl.
 
-using AgentBible
 using JSON3
+
+# Numerical checks and the provenance record, inlined.
+#
+# These were a local package pinned by absolute path, which made the Julia side
+# unrunnable for anyone but its author. The checks are small and are reproduced
+# here in full: they STILL VALIDATE and still raise. Only the package boundary
+# is gone.
+module Checks
+
+# A nested module does not inherit the parent's `using`.
+using JSON3
+
+struct CheckResult
+    check_name::String
+    passed::Bool
+    rtol::Float64
+    atol::Float64
+    norm_used::String
+    error_message::Union{String,Nothing}
+end
+
+struct ProvenanceRecord
+    checks::Vector{CheckResult}
+end
+
+function emit_provenance(record::ProvenanceRecord, io::IO)
+    entries = map(record.checks) do c
+        Dict(
+            "check_name" => c.check_name,
+            "passed" => c.passed,
+            "rtol" => c.rtol,
+            "atol" => c.atol,
+            "norm_used" => c.norm_used,
+            "error_message" => c.error_message,
+        )
+    end
+    payload = Dict("checks_passed" => entries, "provenance_backend" => "inline")
+    print(io, JSON3.write(payload))
+end
+
+check_finite(x; name::String="value") =
+    all(isfinite, x) || error("$name: non-finite value (NaN or Inf)")
+
+check_non_negative(x; name::String="value", atol::Float64=1e-12) =
+    all(v -> v >= -abs(atol), x) || error("$name: negative value $(minimum(x))")
+
+# The tolerance is POSITIONAL at the call site (driver line ~239); keeping the
+# keyword-only form silently produced a MethodError that the n<=24 brute-force
+# fallback then swallowed.
+function check_normalized_l1(x, atol::Float64=1e-9; name::String="value")
+    total = sum(abs, x)
+    isapprox(total, 1.0; atol=max(atol, 1e-12)) ||
+        error("$name: L1 norm $total != 1")
+end
+
+function check_probability(x; name::String="value", atol::Float64=1e-12)
+    check_finite(x; name=name)
+    check_non_negative(x; name=name, atol=atol)
+    all(v -> v <= 1.0 + max(atol, 1e-9), x) ||
+        error("$name: value $(maximum(x)) exceeds 1")
+end
+
+end # module
+
 using GenericTensorNetworks
 using Graphs
 using Random
@@ -25,9 +88,9 @@ function append_provenance(checks)
     provenance_path = get(ENV, "EON_PROVENANCE_PATH", "")
     isempty(provenance_path) && return
     mkpath(dirname(provenance_path))
-    record = AgentBible.ProvenanceRecord(checks)
+    record = Checks.ProvenanceRecord(checks)
     open(provenance_path, "a") do io
-        AgentBible.emit_provenance(record, io)
+        Checks.emit_provenance(record, io)
         write(io, '\n')
     end
 end
@@ -35,10 +98,10 @@ end
 function record_validation!(checks, check_name::String, thunk::Function)
     try
         thunk()
-        push!(checks, AgentBible.CheckResult(check_name, true, 0.0, 0.0, "n/a", nothing))
+        push!(checks, Checks.CheckResult(check_name, true, 0.0, 0.0, "n/a", nothing))
     catch err
         message = sprint(showerror, err)
-        push!(checks, AgentBible.CheckResult(check_name, false, 0.0, 0.0, "n/a", message))
+        push!(checks, Checks.CheckResult(check_name, false, 0.0, 0.0, "n/a", message))
         append_provenance(checks)
         rethrow(err)
     end
@@ -122,11 +185,11 @@ function process_spec(spec)
         exact_ground = Float64(solve(net, SizeMin())[].n) + constant
     end
 
-    checks = AgentBible.CheckResult[]
-    record_validation!(checks, "finite", () -> AgentBible.check_finite(sc; name = "contraction_width"))
+    checks = Checks.CheckResult[]
+    record_validation!(checks, "finite", () -> Checks.check_finite(sc; name = "contraction_width"))
     if exact_ground !== nothing
         record_validation!(
-            checks, "finite", () -> AgentBible.check_finite(exact_ground; name = "exact_ground_energy")
+            checks, "finite", () -> Checks.check_finite(exact_ground; name = "exact_ground_energy")
         )
     end
     append_provenance(checks)

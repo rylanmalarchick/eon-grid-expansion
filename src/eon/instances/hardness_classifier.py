@@ -327,7 +327,7 @@ def classify_default_instance_zoo(
                     )
                 except Exception as exc:
                     # Deliberate broad catch: this is a sweep over many independent
-                    # solver invocations (Gurobi, agentbible, MPS, numpy), any of which
+                    # solver invocations (Gurobi, MPS, numpy), any of which
                     # can fail in unrelated ways. A missed exception type would abort the
                     # whole zoo and lose every instance computed so far. The failure is
                     # recorded (not silently dropped) so the output reflects what was

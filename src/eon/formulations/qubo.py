@@ -243,7 +243,18 @@ def _apply_hess_at_most_k_penalty(
     max_builds: int,
     penalty_strength: float,
 ) -> float:
-    """Cardinality penalty via Hess-style dense quadratic encoding.
+    """Cardinality penalty via a dense quadratic encoding.
+
+    ATTRIBUTION (corrected 2026-08-02): the "hess"/"Hess-style" naming used
+    throughout this module and its callers is historical shorthand and is NOT an
+    attribution of this penalty form. The (sum - K)^2 quadratic penalty is
+    standard. Hess et al. (R13, arXiv:2403.18395) is cited for a different
+    contribution -- omitting slack qubits from the circuit Hamiltonian and
+    evaluating the inequality classically -- which is what our slack-free
+    compilation follows. Verified against the paper's abstract. The identifiers
+    are left as-is rather than renamed late, since the name appears across
+    modules and records; this docstring is the authoritative statement of what
+    the label does and does not claim.
 
     Encodes penalty_strength * (sum(actual_builds) - K)^2 as a QUBO -- a plain
     squared deviation, EQUALITY-BIASED (underbuilding is penalized too; there

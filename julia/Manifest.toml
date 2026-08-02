@@ -2,7 +2,6 @@
 
 julia_version = "1.11.3"
 manifest_format = "2.0"
-project_hash = "47c50c528d0d6f59ee2302fb838056756267a8bd"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "bbc22a9a08a0ef6460041086d8a7b27940ed4ffd"
@@ -65,12 +64,6 @@ weakdeps = ["SparseArrays", "StaticArrays"]
     [deps.Adapt.extensions]
     AdaptSparseArraysExt = "SparseArrays"
     AdaptStaticArraysExt = "StaticArrays"
-
-[[deps.AgentBible]]
-deps = ["Dates", "JSON3", "LibGit2", "LinearAlgebra"]
-path = "/home/rylan/dev/oss/agentbible/languages/julia"
-uuid = "1cf589dd-6d9d-4b3c-8f51-646b1be7d77f"
-version = "0.1.0"
 
 [[deps.AliasTables]]
 deps = ["PtrArrays", "Random"]

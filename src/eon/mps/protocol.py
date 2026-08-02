@@ -24,7 +24,6 @@ from eon.formulations.qubo import (
     compile_layer_b_qubo_hess,
 )
 from eon.validation import (
-    agentbible_julia_path,
     provenance_path,
     validate_finite_array,
     validate_non_negative_array,
@@ -122,7 +121,6 @@ class _JuliQAOAWorker:
         project_path = repo_root / "julia"
         env = dict(os.environ)
         env["EON_PROVENANCE_PATH"] = str(provenance_path())
-        env["EON_AGENTBIBLE_JULIA_PATH"] = str(agentbible_julia_path())
         self._proc = subprocess.Popen(
             [
                 "julia",
@@ -581,7 +579,6 @@ def _run_juliqaoa_oneshot(repo_root: Path, spec: dict[str, object]) -> dict[str,
             env={
                 **os.environ,
                 "EON_PROVENANCE_PATH": str(provenance_path()),
-                "EON_AGENTBIBLE_JULIA_PATH": str(agentbible_julia_path()),
             },
             capture_output=True,
             text=True,
@@ -880,7 +877,6 @@ def _run_gtn_control_oneshot(
             env={
                 **os.environ,
                 "EON_PROVENANCE_PATH": str(provenance_path()),
-                "EON_AGENTBIBLE_JULIA_PATH": str(agentbible_julia_path()),
             },
             capture_output=True,
             text=True,

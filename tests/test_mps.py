@@ -4,6 +4,7 @@ from eon.mps.juliqaoa_smoke import _synthetic_surrogate
 from eon.mps.protocol import run_mps_protocol
 
 
+@pytest.mark.requires_gurobi
 def test_mps_protocol_smoke_runs() -> None:
     surrogate = _synthetic_surrogate("easy_path_n8")
     result = run_mps_protocol(

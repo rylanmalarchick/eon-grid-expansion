@@ -1,3 +1,5 @@
+import pytest
+
 from eon.formulations.layer_b import (
     build_layer_b_surrogate,
     solve_layer_b_surrogate,
@@ -10,6 +12,7 @@ from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.scenarios import build_phase1_scenarios
 
 
+@pytest.mark.requires_gurobi
 def test_layer_b_surrogate_pipeline_runs() -> None:
     net = load_distribution_feeder("ieee33")
     scenarios = build_phase1_scenarios()

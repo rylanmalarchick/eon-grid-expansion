@@ -24,6 +24,7 @@ from eon.instances.scenarios import build_scenario_set
     "requested,candidates,expect_warning",
     [(28, 12, True), (8, 12, False)],
 )
+@pytest.mark.requires_gurobi
 def test_over_wide_neighborhood_warns_and_reports_the_real_size(
     caplog: pytest.LogCaptureFixture, requested: int, candidates: int, expect_warning: bool
 ) -> None:

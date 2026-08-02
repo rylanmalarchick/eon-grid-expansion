@@ -5,7 +5,7 @@
 #   ./scripts/reproduce_headline.sh full    # the honest solve times (hours)
 #
 # Outputs land under experiments/results/repro_<mode>_<stamp>/. Every script
-# already emits agentbible provenance. Run from workspace/ with the stable
+# already emits provenance records. Run from workspace/ with the stable
 # env active and GRB_LICENSE_FILE set. QUICK numbers are a wiring check only
 # and must never be quoted; FULL reproduces the numbers in the proposal.
 

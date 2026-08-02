@@ -32,9 +32,6 @@ dev = [
     "jupyter>=1.0",
 ]
 gurobi = ["gurobipy>=11.0"]
-# Local provenance package (D9): not on an index, so it is optional --
-# without it validation still runs and only provenance recording drops.
-provenance = ["agentbible>=1.0.0"]
 
 [build-system]
 requires = ["hatchling"]

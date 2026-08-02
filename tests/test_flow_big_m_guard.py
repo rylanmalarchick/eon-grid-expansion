@@ -7,6 +7,8 @@ diagnostic that must accompany such an infeasibility."""
 
 from __future__ import annotations
 
+import pytest
+
 from eon.formulations.lindistflow import (
     ExpansionProblemConfig,
     solve_lindistflow_expansion,
@@ -16,6 +18,7 @@ from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.scenarios import build_scenario_set
 
 
+@pytest.mark.requires_gurobi
 def test_suggestion_scales_with_feeder_demand() -> None:
     scenarios = build_scenario_set("stressed_five_point")
     small = suggested_flow_big_m_mva(load_distribution_feeder("ieee33"), scenarios)
@@ -25,6 +28,7 @@ def test_suggestion_scales_with_feeder_demand() -> None:
     assert large >= 33.8
 
 
+@pytest.mark.requires_gurobi
 def test_infeasible_under_small_big_m_carries_a_hint() -> None:
     net = load_distribution_feeder("mv_oberrhein_f1")
     scenarios = build_scenario_set("stressed_five_point")
@@ -42,6 +46,7 @@ def test_infeasible_under_small_big_m_carries_a_hint() -> None:
     assert "25.0" in hint and "suggested" in hint.lower()
 
 
+@pytest.mark.requires_gurobi
 def test_adequate_big_m_solves_the_same_feeder() -> None:
     net = load_distribution_feeder("mv_oberrhein_f1")
     scenarios = build_scenario_set("stressed_five_point")
