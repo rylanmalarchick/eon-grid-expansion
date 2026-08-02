@@ -427,8 +427,54 @@ def solve_lindistflow_expansion(
             "reconfiguration": cfg.enable_reconfiguration,
             "closed_line_count": len(closed_lines),
             "closed_lines": list(closed_lines),
+            **_infeasibility_metadata(net, scenarios, cfg, termination_status),
         },
     )
+
+
+def _infeasibility_metadata(
+    net: pp.pandapowerNet,
+    scenarios: list[Scenario],
+    cfg: ExpansionProblemConfig,
+    termination_status: str,
+) -> dict[str, str]:
+    """An INFEASIBLE caused by an undersized flow big-M looks identical to a
+    physically infeasible grid. Say which one it is (2026-08-01)."""
+    if termination_status != "INFEASIBLE":
+        return {}
+    suggested = suggested_flow_big_m_mva(net, scenarios)
+    if cfg.flow_big_m_mva >= suggested:
+        return {}
+    return {
+        "infeasibility_hint": (
+            f"flow_big_m_mva={cfg.flow_big_m_mva} is below the suggested "
+            f"{suggested:.1f} for this feeder (peak demand exceeds the flow "
+            f"variable bound), so this INFEASIBLE is likely a modeling-bound "
+            f"artifact rather than a physically infeasible grid; re-run with "
+            f"suggested_flow_big_m_mva(net, scenarios)."
+        )
+    }
+
+
+def suggested_flow_big_m_mva(
+    net: pp.pandapowerNet,
+    scenarios: list[Scenario],
+    *,
+    safety_factor: float = 2.0,
+) -> float:
+    """A flow big-M large enough to REPRESENT this feeder's flows.
+
+    flow_big_m_mva bounds every line-flow variable. The head line carries the
+    whole feeder, so the bound must exceed peak apparent demand or the model is
+    infeasible for a purely representational reason (MV Oberrhein f1, 33.8 MW,
+    under the IEEE-33-sized default of 25.0). Returns at least that default so
+    small feeders keep their existing, validated behaviour."""
+    peak_load = float(net.load.p_mw.sum()) if len(net.load) else 0.0
+    peak_scale = max((float(s.load_scale) for s in scenarios), default=1.0)
+    # NB: slots dataclass -- the class attribute is a descriptor, so read the
+    # default off an instance.
+    default_big_m = ExpansionProblemConfig().flow_big_m_mva
+    return max(default_big_m, safety_factor * peak_load * peak_scale)
 
 
 def _existing_line_specs(

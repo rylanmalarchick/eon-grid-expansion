@@ -16,7 +16,7 @@ from pandapower.converter.pypower import from_ppc
 IEEE123_MATPOWER_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "ieee123" / "grid_IEEE123_complete.m"
 )
-SUPPORTED_FEEDERS = frozenset({"ieee33", "ieee123"})
+SUPPORTED_FEEDERS = frozenset({"ieee33", "ieee123", "mv_oberrhein_f1", "mv_oberrhein_f2"})
 
 
 def load_distribution_feeder(name: str) -> pp.pandapowerNet:
@@ -28,11 +28,60 @@ def load_distribution_feeder(name: str) -> pp.pandapowerNet:
     if feeder == "ieee33":
         net = pn.case33bw()
         net.sn_mva = float(net.sn_mva or 1.0)
+    elif feeder.startswith("mv_oberrhein"):
+        net = _load_mv_oberrhein_feeder(feeder)
     else:
         net = _load_ieee123_from_matpower()
 
     _normalize_network(net, feeder)
     return net
+
+
+def _load_mv_oberrhein_feeder(name: str) -> pp.pandapowerNet:
+    """One AS-OPERATED radial feeder of pandapower's MV Oberrhein network.
+
+    MV Oberrhein is a real German 20 kV distribution grid (179 buses, 153
+    distributed generators, geo coordinates) fed by TWO 110/20 kV substations
+    and operated radially via 6 normally-open switches. Modeling it whole is
+    infeasible for a single-slack LinDistFlow: the HV slack buses connect only
+    through transformers, which the optimization model does not carry.
+
+    So we apply the standard MV-feeder abstraction -- the same one that defines
+    IEEE 33/123 -- and take ONE feeder as operated: open switches respected,
+    fed from its substation LV busbar, which is exactly radial and
+    single-source. f1 = 108 buses / 33.8 MW / 12.2 MW DER (from bus 319),
+    f2 = 69 buses / 28.1 MW / 9.9 MW DER (from bus 39).
+    """
+    feeders = {"mv_oberrhein_f1": 319, "mv_oberrhein_f2": 39}
+    if name not in feeders:
+        raise ValueError(f"Unknown MV Oberrhein feeder '{name}'.")
+    source_bus = feeders[name]
+
+    net = pn.mv_oberrhein()
+    open_lines = {
+        int(row.element)
+        for _, row in net.switch.iterrows()
+        if not bool(row.closed) and row.et == "l"
+    }
+    graph = nx.Graph()
+    graph.add_nodes_from(int(bus) for bus in net.bus.index)
+    for index, row in net.line.iterrows():
+        if bool(row.in_service) and int(index) not in open_lines:
+            graph.add_edge(int(row.from_bus), int(row.to_bus))
+    component = nx.node_connected_component(graph, source_bus)
+
+    subnet = pp.select_subnet(net, sorted(component), include_results=False)
+    # Drop the normally-open tie lines: they belong to the neighboring feeder
+    # under this abstraction, and keeping them would silently re-mesh it.
+    tie_lines = [index for index in subnet.line.index if int(index) in open_lines]
+    subnet.line = subnet.line.drop(index=tie_lines)
+    # The HV slack and its transformer are outside the feeder; the substation
+    # LV busbar becomes the slack, as in IEEE 33/123.
+    subnet.ext_grid = subnet.ext_grid.iloc[0:0]
+    subnet.trafo = subnet.trafo.iloc[0:0]
+    pp.create_ext_grid(subnet, bus=source_bus, vm_pu=1.0, name=f"{name}_substation")
+    subnet.sn_mva = float(net.sn_mva or 1.0)
+    return subnet
 
 
 def feeder_graph(net: pp.pandapowerNet) -> nx.Graph:
