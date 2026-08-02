@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from itertools import takewhile
 
 # The reading list uses four indent styles (2/4/6 spaces, one or two
 # spaces after the key). An entry dropped over whitespace is a citation
@@ -26,6 +27,13 @@ _DOI = re.compile(r"DOI\s+(10\.[^\s,;]*[^\s,;.])")
 _YEAR = re.compile(r"\((\d{4})\)")
 _TITLE = re.compile(r"[\"“]([^\"”]+)[\"”]")
 _QUARANTINE_HEADING = "QUARANTINED"
+# Some R-keys are a CLAIM, not a paper: prose followed by "- Author (year),
+# "Title," ... " anchor bullets, one per supporting paper. Flattening those
+# marries the first anchor's eprint to the last anchor's title and DOI, which
+# describes no real paper. Each anchor becomes its own child key (R39a, R39b).
+_ANCHOR = re.compile(r"^\s*-\s+(\S.*)$")
+# "R6 (above) ..." points back at an earlier definition; it is not an entry.
+_CROSS_REFERENCE = re.compile(r"^\((above|see\b)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +63,16 @@ class QuarantinedCitationError(RuntimeError):
     """Raised when an entry on the do-not-cite list would be emitted."""
 
 
+class MalformedEntryError(RuntimeError):
+    """Raised when an entry cannot be parsed into a real citation.
+
+    Guessing here is the dangerous option: a wrong author or a title-shaped
+    author field emits a reference to a paper that does not exist, which is the
+    precise failure D11 exists to prevent. Fail the build instead and make the
+    reading list say what it means.
+    """
+
+
 def parse_reading_list(text: str) -> tuple[list[BibEntry], set[str]]:
     """Returns (citable entries, quarantined identifiers).
 
@@ -72,9 +90,7 @@ def parse_reading_list(text: str) -> tuple[list[BibEntry], set[str]]:
     def flush() -> None:
         nonlocal current_key, current_lines
         if current_key is not None and not in_quarantine:
-            entry = _build_entry(current_key, " ".join(current_lines))
-            if entry is not None:
-                entries.append(entry)
+            entries.extend(_build_entries(current_key, current_lines))
         current_key, current_lines = None, []
 
     for raw_line in text.splitlines():
@@ -112,24 +128,37 @@ def _deduplicate(entries: list[BibEntry]) -> list[BibEntry]:
         incumbent = best.get(entry.key)
         if incumbent is None or _completeness(entry) > _completeness(incumbent):
             best[entry.key] = entry
-    return sorted(best.values(), key=lambda entry: int(entry.key[1:]))
+    return sorted(best.values(), key=_sort_key)
 
 
-def _completeness(entry: BibEntry) -> tuple[int, int]:
+def _sort_key(entry: BibEntry) -> tuple[int, str]:
+    """Numeric by R-number, then by any anchor suffix (R39a before R39b)."""
+    digits = "".join(takewhile(str.isdigit, entry.key[1:]))
+    return int(digits), entry.key[1 + len(digits) :]
+
+
+def _completeness(entry: BibEntry) -> tuple[int, int, int]:
+    """A parsed author outranks a longer gloss: the duplicate is usually a
+    back-reference whose commentary is longer than the definition's."""
     has_real_title = 0 if entry.title == entry.key else 1
-    return has_real_title, len(entry.note)
+    has_author = 0 if entry.authors == "Unknown" else 1
+    return has_real_title, has_author, len(entry.note)
 
 
 def normalize_authors(raw: str) -> str:
     """Join a surname list with BibTeX's " and " separator.
 
     The reading list writes authors as "A, B, C"; BibTeX reads a comma as a
-    "Last, First" separator and mangles that into one malformed name. Forms
-    already using "and", and "et al." shorthand, pass through.
+    "Last, First" separator and mangles that into one malformed name.
+
+    "et al." becomes the literal BibTeX name "others", which is how BibTeX and
+    CSL spell an elided author list. Left as-is it parses as First="Lima et",
+    Last="al." and renders as "al., Lima et."
     """
     cleaned = raw.strip().rstrip(",")
-    if not cleaned or "et al." in cleaned:
+    if not cleaned:
         return cleaned
+    cleaned = re.sub(r",?\s*\bet\.?\s+al\.?", ", others", cleaned).rstrip(",")
     parts = [part.strip() for part in cleaned.split(",") if part.strip()]
     if len(parts) <= 1:
         return cleaned
@@ -142,6 +171,38 @@ def _is_continuation(line: str, entry_indent: int) -> bool:
     return bool(stripped) and (len(line) - len(stripped)) > entry_indent
 
 
+def _split_anchors(lines: list[str]) -> tuple[list[str], list[list[str]]]:
+    """Partition an entry's lines into its own text and its anchor bullets."""
+    head: list[str] = []
+    anchors: list[list[str]] = []
+    for line in lines:
+        bullet = _ANCHOR.match(line)
+        if bullet is not None:
+            anchors.append([bullet.group(1)])
+        elif anchors:
+            anchors[-1].append(line)
+        else:
+            head.append(line)
+    return head, anchors
+
+
+def _build_entries(key: str, lines: list[str]) -> list[BibEntry]:
+    """One reading-list entry yields one citation, or one per anchor bullet."""
+    if lines and _CROSS_REFERENCE.match(lines[0]):
+        return []  # "R6 (above) ..." -- a pointer at a definition elsewhere
+    head, anchors = _split_anchors(lines)
+    if anchors:
+        # The parent is prose stating a claim; the anchors are the papers.
+        return [
+            entry
+            for index, anchor in enumerate(anchors)
+            if (entry := _build_entry(f"{key}{chr(ord('a') + index)}", " ".join(anchor)))
+            is not None
+        ]
+    entry = _build_entry(key, " ".join(head))
+    return [entry] if entry is not None else []
+
+
 def _build_entry(key: str, body: str) -> BibEntry | None:
     title_match = _TITLE.search(body)
     year_match = _YEAR.search(body)
@@ -150,8 +211,13 @@ def _build_entry(key: str, body: str) -> BibEntry | None:
     if title_match is None and arxiv_match is None and doi_match is None:
         return None
 
-    authors = normalize_authors(body.split("(")[0])
+    # Everything before the "(year)" is the author list -- unless the entry
+    # opens with its title, in which case there is no author list to take.
+    lead = body.split("(")[0]
     title = title_match.group(1).strip().rstrip(",") if title_match else key
+    if title_match is not None and title_match.start() < len(lead):
+        lead = ""
+    authors = normalize_authors(lead)
     return BibEntry(
         key=key,
         authors=authors or "Unknown",
@@ -163,10 +229,26 @@ def _build_entry(key: str, body: str) -> BibEntry | None:
     )
 
 
+def _validate(entry: BibEntry) -> None:
+    if entry.authors == "Unknown" or not entry.authors:
+        raise MalformedEntryError(
+            f"{entry.key}: no author list parsed. The reading list entry must "
+            'read "Authors (year), \\"Title,\\" identifier" -- see PLAN.txt D11.'
+        )
+    if entry.title == entry.key:
+        raise MalformedEntryError(f"{entry.key}: no quoted title parsed")
+    if entry.authors == entry.title or entry.title in entry.authors:
+        raise MalformedEntryError(
+            f"{entry.key}: the title was parsed as the author, which would emit "
+            "a reference to a paper that does not exist"
+        )
+
+
 def render_bibliography(text: str) -> tuple[str, list[BibEntry], set[str]]:
     """Render BibTeX, refusing to emit anything on the quarantine list."""
     entries, quarantined = parse_reading_list(text)
     for entry in entries:
+        _validate(entry)
         identifier = entry.arxiv or entry.doi
         if identifier and identifier in quarantined:
             raise QuarantinedCitationError(

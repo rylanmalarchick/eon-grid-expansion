@@ -8,9 +8,12 @@ later adds an R-key for it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from eon.bibliography import (
+    MalformedEntryError,
     QuarantinedCitationError,
     parse_reading_list,
     render_bibliography,
@@ -132,6 +135,107 @@ def test_cross_references_do_not_create_duplicate_keys() -> None:
     assert "Intractable Decathlon" in by_key["R5"].title
 
 
+_CROSS_REF_WITH_ABOVE = """READING -- (above) fixture
+==========================
+
+1. PRIMARY  [V]
+===============
+
+  R6  Ellinas, Chevalier, Chatzivasileiadis (2024), "A hybrid Quantum-Classical
+      Algorithm for Mixed-Integer Optimization in Power Systems,"
+      arXiv:2404.10693. Hybrid Benders for power-system MILPs.
+
+9. LATER SECTION  [V]
+=====================
+
+    R6 (above) Ellinas, Chevalier, Chatzivasileiadis (2024), arXiv:2404.10693.
+        Accelerated Benders splits the MILP into an integer master + LP
+        subproblem; the dual-cut machinery is the certificate's source. [V]
+"""
+
+
+def test_an_above_cross_reference_never_supplants_the_definition() -> None:
+    """"R6 (above) ..." is a pointer, not an entry. Its body begins with a
+    parenthetical, so naive author extraction yields the empty string -- and
+    because the pointer's gloss is longer than the definition's, a
+    length-based tiebreak silently promotes it and emits author={Unknown}."""
+    _, entries, _ = render_bibliography(_CROSS_REF_WITH_ABOVE)
+    by_key = {entry.key: entry for entry in entries}
+    assert by_key["R6"].authors == "Ellinas and Chevalier and Chatzivasileiadis"
+
+
+_TITLE_FIRST = """READING -- title-first fixture
+==============================
+
+5. HARDNESS  [V]
+================
+
+    R34 "Increasing the Hardness of Posiform Planting Using Random QUBOs,"
+        arXiv:2411.03626 / npj Unconventional Computing (2025). Fuses random
+        spin-glass Ising models into posiform-planted QUBOs. [V]
+"""
+
+
+def test_a_title_first_entry_refuses_to_invent_an_author() -> None:
+    """When an entry opens with its title, everything before the first "(" is
+    the title -- not an author list. Emitting it as the author produces a
+    citation whose author field is the title, which is a fabricated reference."""
+    with pytest.raises(MalformedEntryError, match="R34"):
+        render_bibliography(_TITLE_FIRST)
+
+
+_MULTI_ANCHOR = """READING -- multi-anchor fixture
+===============================
+
+8. CLAIMS  [V]
+==============
+
+    R39 Distribution-system RECONFIGURATION is strongly NP-hard; joint
+        expansion+reconfiguration is the richest distribution sub-problem.
+        Canonical anchors (verified from raw .tex / DOI 2026-06-27):
+          - Khodabakhsh, Yang, Basu, Nikolova, Caramanis, Lianeas, Pountourakis
+            (2017), "A Submodular Approach for Electricity Distribution Network
+            Reconfiguration," arXiv:1711.03517 -- reconfiguration is STRONGLY
+            NP-hard via a reduction from 3-PARTITION. [V]
+          - Lavorato, Franco, Rider, Romero (2012), "Imposing Radiality
+            Constraints in Distribution System Optimization Problems," IEEE
+            TPWRS 27(1):172-180, DOI 10.1109/TPWRS.2011.2161349 -- the canonical
+            fictitious-flow radiality encoding. [V]
+"""
+
+
+def test_a_multi_anchor_entry_yields_one_citation_per_anchor() -> None:
+    """R39 is a CLAIM holding two distinct verified papers. Flattening it takes
+    the first arXiv id, the last DOI, and the last title -- Khodabakhsh's eprint
+    married to Lavorato's title and DOI. That reference describes no real paper."""
+    _, entries, _ = render_bibliography(_MULTI_ANCHOR)
+    by_key = {entry.key: entry for entry in entries}
+    assert "R39" not in by_key, "the prose parent must not be emitted as a paper"
+    assert set(by_key) == {"R39a", "R39b"}
+
+    khodabakhsh = by_key["R39a"]
+    assert khodabakhsh.arxiv == "1711.03517"
+    assert khodabakhsh.doi is None
+    assert khodabakhsh.authors.startswith("Khodabakhsh")
+
+    lavorato = by_key["R39b"]
+    assert lavorato.doi == "10.1109/TPWRS.2011.2161349"
+    assert lavorato.arxiv is None
+    assert "Radiality" in lavorato.title
+
+
+def test_the_real_reading_list_emits_no_malformed_entry() -> None:
+    """The regression guard: run the generator over the actual reading list.
+    Every bug above reached references.bib before anyone looked at it."""
+    reading = Path(__file__).resolve().parents[2] / "reading.txt"
+    if not reading.exists():  # the code repo may be checked out standalone
+        pytest.skip(f"reading list not present at {reading}")
+    _, entries, _ = render_bibliography(reading.read_text())
+    for entry in entries:
+        assert entry.title != entry.key, f"{entry.key}: no title parsed"
+        assert entry.authors != "Unknown", f"{entry.key}: no author parsed"
+
+
 @pytest.mark.parametrize(
     "raw,expected",
     [
@@ -143,8 +247,12 @@ def test_cross_references_do_not_create_duplicate_keys() -> None:
             "Ellinas and Chevalier and Chatzivasileiadis",
         ),
         ("Lazo and Watts", "Lazo and Watts"),
-        ("Cuenca et al.", "Cuenca et al."),
-        ("Koch et al.", "Koch et al."),
+        # BibTeX spells "and the rest" as the literal name "others"; the
+        # shorthand "Lima et al." is read as First="Lima et" Last="al.", which
+        # renders in the bibliography as "al., Lima et."
+        ("Cuenca et al.", "Cuenca and others"),
+        ("Koch et al.", "Koch and others"),
+        ("Pelofske, Baertschi, et al.", "Pelofske and Baertschi and others"),
     ],
 )
 def test_author_lists_use_bibtex_and_separator(raw: str, expected: str) -> None:
