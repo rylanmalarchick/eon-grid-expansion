@@ -50,7 +50,7 @@ from eon.mps.protocol import TreeTensorControlResult, run_mps_protocol, run_tree
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("reconfiguration_sweep")
 
-CANDIDATE_COUNT = 24
+DEFAULT_CANDIDATE_COUNT = 24
 MAX_NEW_LINES = 3
 COST_PER_KM = 10_000.0
 SCENARIO_KIND = "stressed_five_point"
@@ -80,6 +80,7 @@ def run_instance(
     seed: int,
     *,
     neighborhood_size: int,
+    candidate_count: int = DEFAULT_CANDIDATE_COUNT,
     time_limit: float,
     with_mps: bool,
     reconfiguration: bool,
@@ -107,7 +108,7 @@ def run_instance(
         scenarios,
         config,
         family=family,
-        candidate_count=CANDIDATE_COUNT,
+        candidate_count=candidate_count,
         neighborhood_size=neighborhood_size,
         seed=seed,
         time_limit=time_limit,
@@ -131,6 +132,7 @@ def run_instance(
             family,
             seed,
             neighborhood_size=neighborhood_size,
+            candidate_count=candidate_count,
             reconfiguration=reconfiguration,
             with_mps=with_mps,
             layer_a=layer_a,
@@ -190,6 +192,7 @@ def run_instance(
             family,
             seed,
             neighborhood_size=neighborhood_size,
+            candidate_count=candidate_count,
             reconfiguration=reconfiguration,
             with_mps=with_mps,
             layer_a=layer_a,
@@ -211,6 +214,7 @@ def _make_record(
     neighborhood_size: int,
     reconfiguration: bool,
     with_mps: bool,
+    candidate_count: int = DEFAULT_CANDIDATE_COUNT,
     layer_a: ExpansionResult,
     coupling: CouplingDiagnostics,
     layer_b: LayerBSolution,
@@ -236,7 +240,7 @@ def _make_record(
         "feeder": feeder,
         "family": family,
         "seed": seed,
-        "candidate_count": CANDIDATE_COUNT,
+        "candidate_count": candidate_count,
         "neighborhood_size": neighborhood_size,
         "enable_reconfiguration": reconfiguration,
         "with_mps": with_mps,
@@ -290,6 +294,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--time-limit", type=float, default=600.0)
     parser.add_argument("--neighborhood", type=int, default=20)
+    # Must exceed --neighborhood, or the surrogate is silently clamped to the
+    # candidate count and the run duplicates a smaller instance size.
+    parser.add_argument(
+        "--candidate-count", type=int, default=DEFAULT_CANDIDATE_COUNT
+    )
     parser.add_argument("--feeders", default="ieee33,ieee123")
     parser.add_argument("--families", default="community_bridging,useful_adversarial")
     parser.add_argument("--seeds", default="7,24")
@@ -393,6 +402,7 @@ def main() -> None:
                     family,
                     seed,
                     neighborhood_size=args.neighborhood,
+                    candidate_count=args.candidate_count,
                     time_limit=args.time_limit,
                     with_mps=args.with_mps,
                     reconfiguration=args.reconfiguration,

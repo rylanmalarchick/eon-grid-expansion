@@ -31,6 +31,8 @@ from eon.validation import validate_finite_array
 
 app = typer.Typer(add_completion=False, help="Generate Layer A/Layer B hardness records.")
 
+logger = logging.getLogger(__name__)
+
 # Classification thresholds. An instance is "hard" only when the MPS and tree-tensor
 # backends both flag it as negative, Layer B validates, and the Layer B MIP gap is open.
 # per-ordering energy gap above which MPS is "negative":
@@ -532,13 +534,29 @@ def build_instance_surrogate(
         rank_jitter=rank_jitter,
     )
     layer_a = solve_lindistflow_expansion(net, scenarios, candidates, config)
+    # A silent min() here turned a requested neighborhood of 28 into a 24-
+    # variable surrogate identical to the n=24 run, and the resulting duplicate
+    # records read as a fourth instance size in the sweep. The clamp is still
+    # correct -- there is nothing to select beyond the candidates that exist --
+    # but it must be visible, since the caller asked for a size it did not get.
+    effective_neighborhood = min(neighborhood_size, len(candidates))
+    if effective_neighborhood < neighborhood_size:
+        logger.warning(
+            "neighborhood_size %d exceeds the %d generated candidates; the "
+            "surrogate has %d variables, NOT %d -- raise candidate_count to "
+            "get a distinct instance size",
+            neighborhood_size,
+            len(candidates),
+            effective_neighborhood,
+            neighborhood_size,
+        )
     surrogate = build_layer_b_surrogate(
         net,
         scenarios,
         candidates,
         layer_a,
         config,
-        neighborhood_size=min(neighborhood_size, len(candidates)),
+        neighborhood_size=effective_neighborhood,
         evaluation_time_limit_s=max(3.0, time_limit / 3.0),
         pair_sample_limit=min(250, neighborhood_size * 6),
     )
