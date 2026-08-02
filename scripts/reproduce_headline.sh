@@ -46,7 +46,7 @@ esac
 PY="${PYTHON:-python}"
 echo "== reproduce_headline mode=${MODE} -> ${OUT}"
 
-echo "== 1/9 feeder hardness (reconfiguration ON vs OFF, IEEE 33)"
+echo "== 1/10 feeder hardness (reconfiguration ON vs OFF, IEEE 33)"
 ${PY} scripts/reconfiguration_sweep.py --feeders ieee33 \
   --families community_bridging --seeds 7,24 --time-limit "${LAYER_A_LIMIT}" \
   ${WITH_MPS_FLAG} --qaoa-rounds 1,2,3 --out "${OUT}/feeder_on.jsonl"
@@ -54,39 +54,43 @@ ${PY} scripts/reconfiguration_sweep.py --feeders ieee33 \
   --families community_bridging --seeds 7,24 --time-limit "${LAYER_A_LIMIT}" \
   --no-reconfiguration --out "${OUT}/feeder_off.jsonl"
 
-echo "== 2/9 Path B scale tier (dense glasses)"
+echo "== 2/10 Path B scale tier (dense glasses)"
 ${PY} scripts/pathb_spine.py --time-limit "${GLASS_LIMIT}" --seeds 7,24 \
   --fused-sizes "" --glass-sizes "${GLASS_SIZES}" --glass-mean-degree 0 \
   --glass-coefficient-range=-10,10 --out "${OUT}/pathb_dense.jsonl"
 
-echo "== 3/9 QAOA landscape (cop vs vanilla vs warm)"
+echo "== 3/10 QAOA landscape (cop vs vanilla vs warm)"
 ${PY} scripts/qaoa_landscape.py --time-limit "${LAYER_A_LIMIT}" \
   --depth "${DEPTH}" --shots 1024 --nm-evals "${NM_EVALS}" \
   --out "${OUT}/landscape.jsonl"
 
-echo "== 4/9 decomposition + D14 certificate"
+echo "== 4/10 decomposition + D14 certificate"
 ${PY} scripts/qaoa_decomposition_run.py --time-limit "${LAYER_A_LIMIT}" \
   --block-size 10 --p 1 --out "${OUT}/decomposition.jsonl"
 
-echo "== 5/9 scale-tier MPS sweep"
+echo "== 5/10 scale-tier MPS sweep"
 ${PY} scripts/scale_mps_sweep.py --sizes "${MPS_SIZES}" --seeds 7,24 \
   --chi-values "${MPS_CHI}" --gurobi-time-limit 600 \
   --out "${OUT}/scale_mps.jsonl"
 
-echo "== 6/9 congestion metrics"
+echo "== 6/10 congestion metrics"
 ${PY} scripts/congestion_metrics.py --time-limit "${LAYER_A_LIMIT}" \
   --eval-time-limit 600 --seed 7 --out "${OUT}/congestion.json"
 
-echo "== 7/9 random-feasible control (S3)"
+echo "== 7/10 random-feasible control (S3)"
 ${PY} scripts/random_feasible_control.py --time-limit "${LAYER_A_LIMIT}" \
   --shots 1024 --repeats 25 --seeds 7 --depth 2 \
   --out "${OUT}/s3_control.jsonl"
 
-echo "== 8/9 logical-vs-physical transpile table (S4)"
+echo "== 8/10 logical-vs-physical transpile table (S4)"
 ${PY} scripts/transpile_table.py --depth 2 --levels 0,1 \
   --out "${OUT}/s4_transpile.json"
 
-echo "== 9/9 figures"
+echo "== 9/10 Qiskit cross-check (D5)"
+${PY} scripts/qiskit_validation.py --shots 4096 --depth 2 \
+  --out "${OUT}/qiskit_validation.json"
+
+echo "== 10/10 figures"
 ${PY} scripts/make_landscape_figure.py --results "${OUT}/landscape.jsonl" \
   --out-dir "${OUT}/figures"
 ${PY} scripts/make_plan_figure.py --metrics "${OUT}/congestion.json" \
