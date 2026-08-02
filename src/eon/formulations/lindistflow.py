@@ -8,14 +8,36 @@ from math import isfinite, sqrt
 from time import perf_counter
 from typing import Any
 
-import gurobipy as gp
 import pandapower as pp
-from gurobipy import GRB
 
 from eon.instances.candidate_lines import CandidateLine
 from eon.instances.distribution_feeders import slack_bus_index
 from eon.instances.scenarios import Scenario
 from eon.metrics.objective import ObjectiveWeights, ScenarioMetrics, aggregate_metrics
+
+# gurobipy is an optional extra: the package advertises a HiGHS fallback, and a
+# reviewer without a Gurobi licence must still be able to import and inspect the
+# model. Solving without it raises a clear error at the call site rather than an
+# ImportError at import time. (The 2026-06 lazy-import fix covered layer_b only,
+# so the package still failed to import in a clean environment.)
+try:
+    import gurobipy as gp
+    from gurobipy import GRB
+
+    GUROBI_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover - exercised in a clean env
+    gp = None  # type: ignore[assignment]
+    GRB = None  # type: ignore[misc,assignment]
+    GUROBI_AVAILABLE = False
+
+
+def _require_gurobi() -> None:
+    if not GUROBI_AVAILABLE:
+        raise ModuleNotFoundError(
+            "gurobipy is required to solve the expansion model. Install the "
+            "optional extra: pip install -e '.[gurobi]' (a Gurobi licence is "
+            "needed; the size-limited licence falls back to HiGHS)."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +119,7 @@ def solve_lindistflow_expansion(
     *,
     fixed_builds: dict[str, int] | None = None,
 ) -> ExpansionResult:
+    _require_gurobi()
     cfg = config or ExpansionProblemConfig()
     fixed_builds = fixed_builds or {}
     slack_bus = slack_bus_index(net)

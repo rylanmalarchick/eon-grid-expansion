@@ -9,24 +9,62 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentbible import (
-    DEFAULT_ATOL,
-    DEFAULT_RTOL,
-    check_finite_array,
-    check_hermitian,
-    check_non_negative_array,
-    check_normalized_l1,
-    check_positive_semidefinite,
-    check_probability_array,
-    check_symmetric,
-    check_unitary,
-)
-from agentbible.provenance import (
-    CheckResult,
-    build_provenance_record,
-    get_provenance_metadata,
-)
 from numpy.typing import ArrayLike
+
+# agentbible is the provenance backbone (D9), developed locally and not
+# installable from an index -- so an external reviewer cannot get it. Import it
+# when present, otherwise fall back to stand-ins that STILL VALIDATE and only
+# drop provenance recording. A no-op fallback would leave a green suite proving
+# nothing.
+try:
+    from agentbible import (
+        DEFAULT_ATOL,
+        DEFAULT_RTOL,
+        check_finite_array,
+        check_hermitian,
+        check_non_negative_array,
+        check_normalized_l1,
+        check_positive_semidefinite,
+        check_probability_array,
+        check_symmetric,
+        check_unitary,
+    )
+    from agentbible.provenance import (
+        CheckResult,
+        build_provenance_record,
+        get_provenance_metadata,
+    )
+
+    AGENTBIBLE_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover - exercised in a clean env
+    import warnings
+
+    # Signatures are compatible at the call sites used here; mypy checks the
+    # agentbible branch, which is the one present in the development env.
+    from eon._validation_fallback import (  # type: ignore[assignment]
+        DEFAULT_ATOL,
+        DEFAULT_RTOL,
+        CheckResult,
+        build_provenance_record,
+        check_finite_array,
+        check_hermitian,
+        check_non_negative_array,
+        check_normalized_l1,
+        check_positive_semidefinite,
+        check_probability_array,
+        check_symmetric,
+        check_unitary,
+        get_provenance_metadata,
+    )
+
+    AGENTBIBLE_AVAILABLE = False
+    warnings.warn(
+        "agentbible not installed: numerical validation still runs, but "
+        "provenance records are not written. Install it for the full "
+        "reproducibility trail.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RESULTS_ROOT = _REPO_ROOT / "experiments" / "results"

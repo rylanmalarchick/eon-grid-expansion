@@ -4,7 +4,6 @@ version = "0.0.1"
 description = "Quantum-enhanced grid expansion planning for the 2026 EON challenge"
 requires-python = ">=3.11"
 dependencies = [
-    "agentbible>=1.0.0",
     "pandapower>=2.14",
     "matpowercaseframes>=2.1",
     "networkx>=3.2",
@@ -33,6 +32,9 @@ dev = [
     "jupyter>=1.0",
 ]
 gurobi = ["gurobipy>=11.0"]
+# Local provenance package (D9): not on an index, so it is optional --
+# without it validation still runs and only provenance recording drops.
+provenance = ["agentbible>=1.0.0"]
 
 [build-system]
 requires = ["hatchling"]
