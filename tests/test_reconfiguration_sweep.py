@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "reconfiguration_sweep.py"
@@ -13,6 +14,11 @@ _spec = importlib.util.spec_from_file_location("reconfiguration_sweep", _SCRIPT)
 assert _spec is not None and _spec.loader is not None
 sweep = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sweep)
+
+
+def _fake_net() -> SimpleNamespace:
+    """Minimal stand-in: the sweep sizes the flow big-M from net.load."""
+    return SimpleNamespace(load=pd.DataFrame({"p_mw": [1.0, 2.0]}))
 
 
 def _fake_layer_a() -> SimpleNamespace:
@@ -109,7 +115,7 @@ def _run(calls: dict[str, list], *, with_mps: bool, p_list: list[int]) -> list[d
             qaoa_rounds_list=p_list,
             angle_iterations=10,
             rank_jitter=0.0,
-            net=object(),
+            net=_fake_net(),
             scenarios=[],
             baseline_stress={},
             run_meta={"time_limit_s": 180.0},

@@ -27,12 +27,17 @@ import logging
 import math
 import subprocess
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
 from eon.formulations.layer_b import LayerBSolution, solve_layer_b_surrogate
-from eon.formulations.lindistflow import ExpansionProblemConfig, ExpansionResult
+from eon.formulations.lindistflow import (
+    ExpansionProblemConfig,
+    ExpansionResult,
+    suggested_flow_big_m_mva,
+)
 from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.hardness_classifier import (
     _compute_baseline_stress,
@@ -92,6 +97,10 @@ def run_instance(
         time_limit_s=time_limit,
         n_scenarios_aggregated=3,
         enable_reconfiguration=reconfiguration,
+        # Sized to the feeder: the head line carries all demand, and the
+        # IEEE-33-scale default cannot represent an MV feeder's flows at all
+        # (silent INFEASIBLE, 2026-08-01). No-op for IEEE 33/123.
+        flow_big_m_mva=suggested_flow_big_m_mva(net, scenarios),
     )
     candidates, layer_a, surrogate = build_instance_surrogate(
         net,
@@ -363,7 +372,12 @@ def main() -> None:
     for feeder in feeders:
         nets[feeder] = load_distribution_feeder(feeder)
         baseline_stress[feeder] = _compute_baseline_stress(
-            nets[feeder], scenarios, baseline_config
+            nets[feeder],
+            scenarios,
+            replace(
+                baseline_config,
+                flow_big_m_mva=suggested_flow_big_m_mva(nets[feeder], scenarios),
+            ),
         )
 
     ok = 0
