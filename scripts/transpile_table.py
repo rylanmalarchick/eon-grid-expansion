@@ -25,6 +25,7 @@ import argparse
 import json
 import logging
 import subprocess
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -102,6 +103,7 @@ def _row(
     }
     for level in levels:
         try:
+            started = time.perf_counter()
             physical = transpile(
                 logical,
                 basis_gates=GARNET_LIKE_BASIS,
@@ -109,7 +111,14 @@ def _row(
                 optimization_level=level,
                 seed_transpiler=7,
             )
-            row["transpiled"][str(level)] = _metrics(physical)  # type: ignore[index]
+            metrics = _metrics(physical)
+            metrics["transpile_seconds"] = round(time.perf_counter() - started, 1)
+            row["transpiled"][str(level)] = metrics  # type: ignore[index]
+            logger.info(
+                "  %s opt%d: depth=%s 2q=%s (%.0fs)",
+                label, level, metrics["depth"], metrics["two_qubit_gates"],
+                metrics["transpile_seconds"],
+            )
         # Broad catch: record the per-level failure and keep the other levels.
         except Exception as exc:
             logger.exception("transpile failed for %s at level %d", label, level)
@@ -143,12 +152,15 @@ def main() -> None:
     instance = generate_fused_planted(20, seed=7, block_size=10, alpha=0.1)
     surrogate = build_external_surrogate(instance)
 
-    rows = [
-        _row(surrogate, "vanilla", "x", depth=args.depth, penalty_free=True,
-             coupling=coupling, levels=levels),
-        _row(surrogate, "cop", "xy_ring", depth=args.depth, penalty_free=True,
-             coupling=coupling, levels=levels),
-    ]
+    rows = []
+    for label, mixer in (("vanilla", "x"), ("cop", "xy_ring")):
+        rows.append(
+            _row(surrogate, label, mixer, depth=args.depth, penalty_free=True,
+                 coupling=coupling, levels=levels)
+        )
+        # Save after each algorithm: transpiling a densely-coupled QAOA circuit
+        # onto a sparse lattice can take tens of minutes per level.
+        out_path.write_text(json.dumps({"rows": rows, "partial": True}, indent=2) + "\n")
 
     for row in rows:
         circuit = build_gate_level_qaoa_circuit(
@@ -165,7 +177,8 @@ def main() -> None:
         # cop's fixed-weight state prep is an `initialize`, which QASM3 export
         # rejects; record that rather than pretending the artifact exists.
         except (qasm3.QASM3ExporterError, TypeError, ValueError) as exc:
-            row["qasm3_error"] = f"{type(exc).__name__}: {exc}"
+            # Truncate: the exporter echoes the whole 2^20 statevector.
+            row["qasm3_error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
             logger.warning("OpenQASM 3 export failed for %s: %s", row["algorithm"], exc)
 
     payload = {
