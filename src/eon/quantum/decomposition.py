@@ -6,10 +6,15 @@ and rescores the merged plan on the FULL surrogate objective (the upper
 bound). The certificate's lower bound is classical optimization duality only
 (PLAN.txt D14): the dropped-coupling block bound -- each block minimized
 exactly (cardinality relaxed), each dropped inter-block coupling J
-contributing min(0, J) -- optionally tightened by a Gurobi best_bound the
+contributing min(0, J) -- optionally tightened by a Gurobi dual bound the
 caller provides. The certified gap is the DECOMPOSITION/INTEGRALITY gap of
 the classical wrapper, NOT classical-vs-quantum advantage; tightening it is
 a classical workstream.
+
+The bound kinds are separate types (eon.quantum.bounds), so an incumbent
+objective cannot be handed to the dual-bound slot: numerically it would look
+like a perfectly ordinary bound and would silently make the certificate look
+tight.
 """
 
 from __future__ import annotations
@@ -20,13 +25,19 @@ from itertools import product
 import networkx as nx
 
 from eon.formulations.layer_b import LayerBSolution, LayerBSurrogate
+from eon.quantum.bounds import (
+    CertifiedLowerBound,
+    ClassicalDecompositionGap,
+    HeuristicIncumbent,
+)
 from eon.quantum.cop_qaoa import run_constrained_qaoa_subproblem
-
-_CERTIFICATE_TOLERANCE = 1e-6
 
 
 @dataclass(frozen=True, slots=True)
 class DecompositionCertificate:
+    # The typed pair is the certificate; the flat fields below are kept for the
+    # JSON records that already reference them.
+    gap_object: ClassicalDecompositionGap
     lower_bound: float
     upper_bound: float
     gap: float
@@ -34,7 +45,7 @@ class DecompositionCertificate:
     block_sizes: tuple[int, ...]
     dropped_coupling_count: int
     dropped_coupling_bound: float
-    gurobi_best_bound: float | None
+    gurobi_dual_bound: float | None
     # Transparency: the greedy cardinality repair can override block-QAOA
     # outputs; these fields say whether it fired and how many variable builds
     # it changed, so "reaggregated from per-block QAOA" is never overstated.
@@ -125,10 +136,27 @@ def solve_decomposed_qaoa(
     block_size: int = 5,
     p: int = 1,
     shots: int = 1024,
-    gurobi_best_bound: float | None = None,
+    gurobi_dual_bound: CertifiedLowerBound | None = None,
 ) -> tuple[LayerBSolution, DecompositionCertificate]:
     """Per-block constrained QAOA -> merge -> greedy cardinality repair ->
-    rescore on the FULL surrogate objective (upper bound) + D14 certificate."""
+    rescore on the FULL surrogate objective (upper bound) + D14 certificate.
+
+    `gurobi_dual_bound` is a CertifiedLowerBound rather than a float on
+    purpose: a solver's incumbent objective is numerically indistinguishable
+    from its dual bound, and passing the wrong one produces a certificate that
+    looks tight and proves nothing.
+    """
+    # Checked on arrival, not where it is consumed: a wrong-typed bound that
+    # loses the max against the block bound would otherwise slip through
+    # unexamined and only fail on some later instance where it wins.
+    if gurobi_dual_bound is not None and not isinstance(
+        gurobi_dual_bound, CertifiedLowerBound
+    ):
+        raise TypeError(
+            "gurobi_dual_bound must be a CertifiedLowerBound, got "
+            f"{type(gurobi_dual_bound).__name__}; only a proven bound may "
+            "certify the decomposition gap"
+        )
     blocks = decompose_surrogate(surrogate, block_size=block_size)
     outside_fixed = {
         name: value
@@ -176,27 +204,33 @@ def solve_decomposed_qaoa(
     upper_bound = surrogate.surrogate_objective(toggle_decisions)
 
     block_bound, dropped_count = dropped_coupling_lower_bound(surrogate, blocks)
-    if gurobi_best_bound is not None and gurobi_best_bound > block_bound:
-        lower_bound = float(gurobi_best_bound)
-        source = "gurobi_best_bound"
+    if gurobi_dual_bound is not None and gurobi_dual_bound.value > block_bound:
+        certified = gurobi_dual_bound
     else:
-        lower_bound = block_bound
-        source = "dropped_coupling_block_bound"
-    if lower_bound > upper_bound + _CERTIFICATE_TOLERANCE:
-        raise RuntimeError(
-            f"certificate violation: lower bound {lower_bound} exceeds upper "
-            f"bound {upper_bound} -- a bug in the bound or the rescore, not a result"
+        certified = CertifiedLowerBound(
+            value=block_bound, source="dropped_coupling_block_bound"
         )
+    # Construction is the check: mismatched kinds raise TypeError, and a lower
+    # bound above the incumbent raises ValueError.
+    gap_object = ClassicalDecompositionGap(
+        lower=certified,
+        upper=HeuristicIncumbent(
+            value=upper_bound, source="rescored_decomposed_plan"
+        ),
+    )
 
     certificate = DecompositionCertificate(
-        lower_bound=lower_bound,
+        gap_object=gap_object,
+        lower_bound=certified.value,
         upper_bound=upper_bound,
-        gap=upper_bound - lower_bound,
-        lower_bound_source=source,
+        gap=gap_object.value,
+        lower_bound_source=certified.source,
         block_sizes=tuple(len(block.variables) for block in blocks),
         dropped_coupling_count=dropped_count,
         dropped_coupling_bound=block_bound,
-        gurobi_best_bound=gurobi_best_bound,
+        gurobi_dual_bound=(
+            gurobi_dual_bound.value if gurobi_dual_bound is not None else None
+        ),
         repair_applied=repair_applied,
         builds_changed_by_repair=builds_changed,
     )
@@ -209,6 +243,6 @@ def solve_decomposed_qaoa(
         actual_builds=combined_builds,
         selected_candidates=selected_candidates,
         status="DECOMPOSED_QAOA",
-        best_bound=lower_bound,
+        best_bound=certified.value,
     )
     return solution, certificate

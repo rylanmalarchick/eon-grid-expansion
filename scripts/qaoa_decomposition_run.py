@@ -36,6 +36,7 @@ from eon.instances.hardness_classifier import (
     build_instance_surrogate,
 )
 from eon.instances.scenarios import build_scenario_set
+from eon.quantum.bounds import CertifiedLowerBound
 from eon.quantum.decomposition import solve_decomposed_qaoa
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -46,6 +47,14 @@ DISCLAIMER = (
     "certified gap = decomposition/integrality gap of the classical wrapper; "
     "NOT classical-vs-quantum advantage"
 )
+
+
+def _certified(best_bound: float | None) -> CertifiedLowerBound | None:
+    """Gurobi's ObjBound is a dual bound -- proven, not merely achieved -- so it
+    is the one solver output that may certify the decomposition gap."""
+    if best_bound is None:
+        return None
+    return CertifiedLowerBound(value=float(best_bound), source="gurobi_dual_bound")
 
 
 def _git_commit() -> str:
@@ -126,7 +135,7 @@ def main() -> None:
             block_size=args.block_size,
             p=args.p,
             shots=args.shots,
-            gurobi_best_bound=layer_b.best_bound,
+            gurobi_dual_bound=_certified(layer_b.best_bound),
         )
         merged_builds = solution.actual_builds
         rescore = solve_lindistflow_expansion(
@@ -179,7 +188,7 @@ def main() -> None:
             block_size=args.block_size,
             p=args.p,
             shots=args.shots,
-            gurobi_best_bound=ext_layer_b.best_bound,
+            gurobi_dual_bound=_certified(ext_layer_b.best_bound),
         )
         assert instance.planted_energy is not None  # fused instances always plant
         planted = float(instance.planted_energy)

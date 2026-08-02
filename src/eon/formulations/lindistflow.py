@@ -49,6 +49,10 @@ class ExpansionProblemConfig:
     n_scenarios_aggregated: int = 3
     time_limit_s: float = 60.0
     mip_gap: float = 0.01
+    # Gurobi thread count; 0 keeps its default (all cores). Set to 1 when many
+    # solves run as parallel worker processes, or they oversubscribe the box
+    # and each solve gets slower than it would be alone.
+    threads: int = 0
     flow_big_m_mva: float = 25.0
     voltage_big_m_pu: float = 0.35
     # Voltage-variable band slack under reconfiguration (deep radial sags are
@@ -139,6 +143,8 @@ def solve_lindistflow_expansion(
     model.Params.OutputFlag = 0
     model.Params.TimeLimit = cfg.time_limit_s
     model.Params.MIPGap = cfg.mip_gap
+    if cfg.threads > 0:
+        model.Params.Threads = cfg.threads
 
     build_vars: dict[str, gp.Var] = {}
     for line in candidate_specs:

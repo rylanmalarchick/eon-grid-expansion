@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from eon.instances.external import build_external_surrogate, generate_fused_planted
+from eon.quantum.bounds import CertifiedLowerBound, HeuristicIncumbent
 from eon.quantum.decomposition import (
     decompose_surrogate,
     dropped_coupling_lower_bound,
@@ -40,15 +41,21 @@ def test_gurobi_bound_tightens_when_larger() -> None:
     block_bound, dropped = dropped_coupling_lower_bound(surrogate, blocks)
     assert dropped > 0  # fusion couples across blocks; some edges must be cut
 
-    tighter = block_bound + 0.5
+    tighter = CertifiedLowerBound(value=block_bound + 0.5, source="gurobi_dual_bound")
     _, certificate = solve_decomposed_qaoa(
-        surrogate, block_size=4, p=1, shots=128, gurobi_best_bound=tighter
+        surrogate, block_size=4, p=1, shots=128, gurobi_dual_bound=tighter
     )
-    assert certificate.lower_bound == pytest.approx(tighter)
-    assert certificate.lower_bound_source == "gurobi_best_bound"
+    assert certificate.lower_bound == pytest.approx(tighter.value)
+    assert certificate.lower_bound_source == "gurobi_dual_bound"
 
     _, certificate_loose = solve_decomposed_qaoa(
-        surrogate, block_size=4, p=1, shots=128, gurobi_best_bound=block_bound - 100.0
+        surrogate,
+        block_size=4,
+        p=1,
+        shots=128,
+        gurobi_dual_bound=CertifiedLowerBound(
+            value=block_bound - 100.0, source="gurobi_dual_bound"
+        ),
     )
     assert certificate_loose.lower_bound == pytest.approx(block_bound)
     assert certificate_loose.lower_bound_source == "dropped_coupling_block_bound"
@@ -57,9 +64,31 @@ def test_gurobi_bound_tightens_when_larger() -> None:
 def test_impossible_bound_raises_certificate_violation() -> None:
     instance = generate_fused_planted(12, seed=7, block_size=4, alpha=0.5)
     surrogate = build_external_surrogate(instance)
-    with pytest.raises(RuntimeError, match="certificate violation"):
+    with pytest.raises(ValueError, match="exceeds upper bound"):
         solve_decomposed_qaoa(
-            surrogate, block_size=4, p=1, shots=128, gurobi_best_bound=1e12
+            surrogate,
+            block_size=4,
+            p=1,
+            shots=128,
+            gurobi_dual_bound=CertifiedLowerBound(value=1e12, source="gurobi_dual_bound"),
+        )
+
+
+def test_an_incumbent_cannot_reach_the_dual_bound_slot() -> None:
+    """The reason the slot is typed: a solver's incumbent objective is just as
+    much a float as its dual bound, and using the wrong one makes the
+    certificate look tight while proving nothing."""
+    instance = generate_fused_planted(12, seed=7, block_size=4, alpha=0.5)
+    surrogate = build_external_surrogate(instance)
+    with pytest.raises(TypeError, match="CertifiedLowerBound"):
+        solve_decomposed_qaoa(
+            surrogate,
+            block_size=4,
+            p=1,
+            shots=128,
+            gurobi_dual_bound=HeuristicIncumbent(  # type: ignore[arg-type]
+                value=-1e6, source="some_heuristic_run"
+            ),
         )
 
 
