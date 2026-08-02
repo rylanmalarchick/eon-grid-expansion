@@ -128,6 +128,7 @@ def plot_hardness(records: list[dict], out_stem: Path) -> Path:
     by_seed: dict[int, list[dict]] = defaultdict(list)
     for record in on:
         by_seed[int(record["seed"])].append(record)
+    label_positions: list[float] = []
     for index, seed in enumerate(sorted(by_seed)):
         subset = sorted(by_seed[seed], key=lambda r: r["coupling"]["variable_count"])
         xs = [r["coupling"]["variable_count"] for r in subset]
@@ -141,10 +142,21 @@ def plot_hardness(records: list[dict], out_stem: Path) -> Path:
             markeredgecolor="#fcfcfb", markeredgewidth=0.9,
         )
         # Direct label at the right end, in text ink rather than the series
-        # colour; the marker beside it carries identity.
+        # colour; the marker beside it carries identity. Series that converge
+        # (two seeds both near-decoupled) would print their labels on top of
+        # each other, so stagger any that land within a few percent of the axis.
+        offset = 0.0
+        low, high = right.get_ylim()
+        # Stagger AWAY from the nearer axis edge, or the displaced label
+        # clips off the figure instead of merely overlapping.
+        direction = 1.0 if ys[-1] < 0.5 * (low + high) else -1.0
+        for placed in label_positions:
+            if abs(placed - ys[-1]) < 0.06 * max(high - low, 1.0):
+                offset += direction * 11.0
+        label_positions.append(ys[-1])
         right.annotate(
             f"seed {seed}",
-            xy=(xs[-1], ys[-1]), xytext=(6, 0), textcoords="offset points",
+            xy=(xs[-1], ys[-1]), xytext=(6, offset), textcoords="offset points",
             va="center", fontsize=7.8, color=_MUTED, zorder=4,
         )
     _style(
