@@ -26,6 +26,8 @@ _ARXIV = re.compile(r"arXiv:\s*([0-9]{4}\.[0-9]{4,5})")
 _DOI = re.compile(r"DOI\s+(10\.[^\s,;]*[^\s,;.])")
 _YEAR = re.compile(r"\((\d{4})\)")
 _TITLE = re.compile(r"[\"“]([^\"”]+)[\"”]")
+# Longest run of gloss we will accept as a venue. Anything longer is prose.
+_MAX_VENUE = 80
 _QUARANTINE_HEADING = "QUARANTINED"
 # Some R-keys are a CLAIM, not a paper: prose followed by "- Author (year),
 # "Title," ... " anchor bullets, one per supporting paper. Flattening those
@@ -45,6 +47,7 @@ class BibEntry:
     arxiv: str | None
     doi: str | None
     note: str
+    journal: str | None = None
 
     def to_bibtex(self) -> str:
         fields = [f"  author = {{{self.authors}}}", f"  title = {{{self.title}}}"]
@@ -53,6 +56,8 @@ class BibEntry:
         if self.arxiv:
             fields.append(f"  eprint = {{{self.arxiv}}}")
             fields.append("  archivePrefix = {arXiv}")
+        if self.journal:
+            fields.append(f"  journal = {{{self.journal}}}")
         if self.doi:
             fields.append(f"  doi = {{{self.doi}}}")
         entry_type = "@article" if self.doi else "@misc"
@@ -203,6 +208,48 @@ def _build_entries(key: str, lines: list[str]) -> list[BibEntry]:
     return [entry] if entry is not None else []
 
 
+def _extract_journal(body: str, title_match: re.Match[str] | None) -> str | None:
+    """The venue, when the entry has one, sits IMMEDIATELY after the title.
+
+    Anchoring there rather than scanning forward is the whole trick. A preprint
+    reads `"Title," arXiv:1234.5678. Commentary...`, and a forward scan for
+    something capitalised skips the identifier and files the commentary as a
+    journal -- printing our own notes as a publication venue. Nothing is
+    extracted unless it starts where a venue must start.
+
+    The end is the identifier or a semicolon, never a period: venues are full
+    of abbreviating periods ("IEEE Trans. Power Systems") and cutting at the
+    first one leaves a fragment.
+    """
+    if title_match is None:
+        return None
+    rest = body[title_match.end():].lstrip(" ,")
+    if not rest or not rest[0].isupper():
+        return None  # an identifier or lowercase gloss follows, not a venue
+    for terminator in ("; ", " DOI ", " arXiv:", "; DOI"):
+        index = rest.find(terminator)
+        if index != -1:
+            rest = rest[:index]
+    # Only break at a sentence period once a digit has appeared: a venue runs
+    # out at its volume/page numerals, and every period before those belongs to
+    # an abbreviation ("IEEE Trans.", "Renew. Sustain. Energy Rev.").
+    seen_digit = False
+    for position, character in enumerate(rest):
+        if character.isdigit():
+            seen_digit = True
+        elif (
+            seen_digit
+            and character == "."
+            and rest[position + 1 : position + 2] == " "
+        ):
+            rest = rest[:position]
+            break
+    candidate = rest.strip().rstrip(",.")
+    if not candidate or len(candidate) > _MAX_VENUE or " -- " in candidate:
+        return None
+    return candidate
+
+
 def _build_entry(key: str, body: str) -> BibEntry | None:
     title_match = _TITLE.search(body)
     year_match = _YEAR.search(body)
@@ -218,6 +265,7 @@ def _build_entry(key: str, body: str) -> BibEntry | None:
     if title_match is not None and title_match.start() < len(lead):
         lead = ""
     authors = normalize_authors(lead)
+    journal = _extract_journal(body, title_match)
     return BibEntry(
         key=key,
         authors=authors or "Unknown",
@@ -226,6 +274,7 @@ def _build_entry(key: str, body: str) -> BibEntry | None:
         arxiv=arxiv_match.group(1) if arxiv_match else None,
         doi=doi_match.group(1) if doi_match else None,
         note=body,
+        journal=journal,
     )
 
 

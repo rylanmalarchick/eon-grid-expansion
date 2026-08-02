@@ -259,3 +259,85 @@ def test_author_lists_use_bibtex_and_separator(raw: str, expected: str) -> None:
     from eon.bibliography import normalize_authors
 
     assert normalize_authors(raw) == expected
+
+
+_WITH_VENUE = """READING -- venue fixture
+========================
+
+1. PRIMARY  [V]
+===============
+
+  R2  Lazo and Watts (2024), "Stochastic expansion via DistFlow," Renew.
+      Sustain. Energy Rev. 191, 114156; DOI 10.1016/j.rser.2023.114156. Gloss.
+  R50 Gust et al. (2024), "Designing electricity distribution networks,"
+      European Journal of Operational Research 315(1):271-288. Gloss here.
+  R47 Baertschi, Eidenbenz (2019), "Deterministic Preparation of Dicke
+      States," arXiv:1904.07358 (LANL). Gloss.
+"""
+
+
+def test_journal_is_extracted_when_present() -> None:
+    """An entry with no venue renders as a bare author-title-year line, which
+    reads as a half-finished reference in a submitted document."""
+    _, entries, _ = render_bibliography(_WITH_VENUE)
+    by_key = {entry.key: entry for entry in entries}
+    assert by_key["R50"].journal == "European Journal of Operational Research 315(1):271-288"
+    assert "Renew" in (by_key["R2"].journal or "")
+    # An arXiv preprint has no journal; inventing one would be a fabrication.
+    assert by_key["R47"].journal is None
+
+
+def test_journal_reaches_the_bibtex() -> None:
+    bibtex, _, _ = render_bibliography(_WITH_VENUE)
+    assert "journal = {European Journal of Operational Research 315(1):271-288}" in bibtex
+
+
+_VENUE_TRAPS = """READING -- venue trap fixture
+=============================
+
+1. PRIMARY  [V]
+===============
+
+  R1  Cuenca et al. (2025), "Event-informed identification of planning
+      candidates," IEEE Trans. Power Systems 40(1) 492-504; DOI
+      10.1109/TPWRS.2024.3404115. Layer A candidate generation.
+  R33 Hahn, Pelofske, Djidjev (2023), "Posiform Planting: Generating QUBO
+      Instances for Benchmarking," arXiv:2308.05859. QUBOs of arbitrary size
+      with a UNIQUE PLANTED optimum, tailored to a target connectivity.
+      Resolves the NISQ-vs-hardness tension: hardware-native + known optimum.
+  R2  Lazo and Watts (2024), "Stochastic expansion," Renew. Sustain. Energy
+      Rev. 191, 114156; DOI 10.1016/j.rser.2023.114156. Gloss.
+"""
+
+
+def test_abbreviated_venue_is_not_truncated_at_its_periods() -> None:
+    """"IEEE Trans. Power Systems" must survive; cutting at the first period
+    after an abbreviation leaves the bare word "IEEE Trans" as the venue."""
+    _, entries, _ = render_bibliography(_VENUE_TRAPS)
+    by_key = {entry.key: entry for entry in entries}
+    assert by_key["R1"].journal == "IEEE Trans. Power Systems 40(1) 492-504"
+    assert by_key["R2"].journal == "Renew. Sustain. Energy Rev. 191, 114156"
+
+
+def test_gloss_prose_never_becomes_a_venue() -> None:
+    """A preprint entry is title, identifier, then commentary. Scanning forward
+    for something capitalised finds the commentary and files it as a journal --
+    printing a sentence of our own notes as if it were a publication venue."""
+    _, entries, _ = render_bibliography(_VENUE_TRAPS)
+    by_key = {entry.key: entry for entry in entries}
+    assert by_key["R33"].journal is None, (
+        f"invented a venue for a preprint: {by_key['R33'].journal!r}"
+    )
+
+
+def test_no_venue_in_the_real_bibliography_looks_like_prose() -> None:
+    reading = Path(__file__).resolve().parents[2] / "reading.txt"
+    if not reading.exists():
+        pytest.skip("reading list not present")
+    _, entries, _ = render_bibliography(reading.read_text())
+    for entry in entries:
+        if entry.journal is None:
+            continue
+        assert len(entry.journal) <= 80, f"{entry.key}: venue too long: {entry.journal!r}"
+        assert " -- " not in entry.journal, f"{entry.key}: gloss leaked: {entry.journal!r}"
+        assert not entry.journal.endswith("."), f"{entry.key}: {entry.journal!r}"
