@@ -108,6 +108,7 @@ def _run(calls: dict[str, list], *, with_mps: bool, p_list: list[int]) -> list[d
             reconfiguration=True,
             qaoa_rounds_list=p_list,
             angle_iterations=10,
+            rank_jitter=0.0,
             net=object(),
             scenarios=[],
             baseline_stress={},

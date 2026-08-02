@@ -518,6 +518,7 @@ def build_instance_surrogate(
     time_limit: float,
     cost_per_km: float,
     baseline_stress: dict[int, float],
+    rank_jitter: float = 0.0,
 ) -> tuple[list[CandidateLine], ExpansionResult, LayerBSurrogate]:
     """Build one zoo instance up to its Layer B surrogate (no MPS / validation).
     The single source of truth for instance construction."""
@@ -528,6 +529,7 @@ def build_instance_surrogate(
         seed=seed,
         cost_per_km=cost_per_km,
         stress_info=baseline_stress if family == "useful_adversarial" else None,
+        rank_jitter=rank_jitter,
     )
     layer_a = solve_lindistflow_expansion(net, scenarios, candidates, config)
     surrogate = build_layer_b_surrogate(

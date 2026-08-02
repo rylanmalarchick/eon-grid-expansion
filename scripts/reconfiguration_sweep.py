@@ -80,6 +80,7 @@ def run_instance(
     reconfiguration: bool,
     qaoa_rounds_list: list[int],
     angle_iterations: int,
+    rank_jitter: float,
     net: object,
     scenarios: list,
     baseline_stress: dict[int, float],
@@ -103,6 +104,7 @@ def run_instance(
         time_limit=time_limit,
         cost_per_km=COST_PER_KM,
         baseline_stress=baseline_stress,
+        rank_jitter=rank_jitter,
     )
     coupling = coupling_diagnostics(surrogate)
     layer_b = solve_layer_b_surrogate(surrogate, time_limit_s=time_limit, mip_gap=0.01)
@@ -303,6 +305,13 @@ def main() -> None:
         "--angle-iterations", type=int, default=10, help="QAOA angle-optimization iterations."
     )
     parser.add_argument(
+        "--rank-jitter",
+        type=float,
+        default=0.0,
+        help="Perturb the candidate ranking's tie-breaks so seeds genuinely "
+        "diversify (0.0 = deterministic families, seeds are a NO-OP).",
+    )
+    parser.add_argument(
         "--log-file",
         default="",
         help="Log file path (default: <out>.log next to the JSONL) so a killed run "
@@ -332,6 +341,8 @@ def main() -> None:
         "git_commit": _git_commit(),
         "timestamp_utc": stamp,
         "scenario_kind": SCENARIO_KIND,
+        "rank_jitter": args.rank_jitter,
+        "seed_diversifies": args.rank_jitter > 0.0,
     }
 
     grid = [(f, fam, s) for f in feeders for fam in families for s in seeds]
@@ -373,6 +384,7 @@ def main() -> None:
                     reconfiguration=args.reconfiguration,
                     qaoa_rounds_list=qaoa_rounds_list,
                     angle_iterations=args.angle_iterations,
+                    rank_jitter=args.rank_jitter,
                     net=nets[feeder],
                     scenarios=scenarios,
                     baseline_stress=baseline_stress[feeder],

@@ -26,6 +26,16 @@ class CandidateLine:
     build_cost: float
 
 
+def seed_diversifies(family: str, *, rank_jitter: float) -> bool:
+    """Does `seed` actually change the instance for this family?
+
+    Only random_uniform consumes the RNG at rank_jitter=0 -- the other
+    families are deterministic heuristic sorts, so seeds are a NO-OP there
+    (root-caused 2026-08-01, after a 12-config sweep returned 3 distinct
+    instances). Call this before claiming seed-replication."""
+    return family.lower().strip() == "random_uniform" or rank_jitter > 0.0
+
+
 def generate_candidate_lines(
     net: pp.pandapowerNet,
     family: str,
@@ -34,9 +44,16 @@ def generate_candidate_lines(
     seed: int = 7,
     cost_per_km: float = 25_000.0,
     stress_info: dict[int, float] | None = None,
+    rank_jitter: float = 0.0,
 ) -> list[CandidateLine]:
+    """rank_jitter perturbs the heuristic ranking's arbitrary tie-breaks so
+    that seeds produce genuinely distinct instances. Default 0.0 reproduces
+    the pre-2026-08-01 behavior exactly (every earlier record stays valid);
+    see seed_diversifies()."""
     if count <= 0:
         return []
+    if rank_jitter < 0.0:
+        raise ValueError(f"rank_jitter must be >= 0, got {rank_jitter}")
 
     candidate_family = family.lower().strip()
     valid_families = {
@@ -58,7 +75,8 @@ def generate_candidate_lines(
         return []
 
     ranked_pairs = _rank_pairs(
-        graph, coords, eligible_pairs, candidate_family, seed, stress_info=stress_info,
+        graph, coords, eligible_pairs, candidate_family, seed,
+        stress_info=stress_info, rank_jitter=rank_jitter,
     )
     selected_pairs = ranked_pairs[:count]
     candidates: list[CandidateLine] = []
@@ -107,8 +125,15 @@ def _rank_pairs(
     seed: int,
     *,
     stress_info: dict[int, float] | None = None,
+    rank_jitter: float = 0.0,
 ) -> list[tuple[int, int]]:
     rng = random.Random(seed)
+
+    def jitter() -> float:
+        # Perturbs the arbitrary tie-breaks of a heuristic ranking. At the
+        # default 0.0 every family below except random_uniform is a pure
+        # deterministic sort and `seed` has NO effect (seed_diversifies()).
+        return rng.uniform(-rank_jitter, rank_jitter) if rank_jitter > 0.0 else 0.0
     if family == "random_uniform":
         shuffled = list(pairs)
         rng.shuffle(shuffled)
@@ -119,7 +144,7 @@ def _rank_pairs(
         for pair in pairs:
             length = _distance(coords[pair[0]], coords[pair[1]])
             hop = nx.shortest_path_length(graph, *pair)
-            scored.append((abs(length - 0.35 * hop), pair))
+            scored.append((abs(length - 0.35 * hop) + jitter(), pair))
         return [pair for _, pair in sorted(scored)]
 
     if family == "adversarial_long_range":
@@ -129,7 +154,7 @@ def _rank_pairs(
             hop = nx.shortest_path_length(graph, *pair)
             length = _distance(coords[pair[0]], coords[pair[1]])
             score = hop + 2.0 * length + leaf_bonus[pair[0]] + leaf_bonus[pair[1]]
-            scored.append((-score, pair))
+            scored.append((-score + jitter(), pair))
         return [pair for _, pair in sorted(scored)]
 
     if family == "useful_adversarial":
@@ -141,7 +166,7 @@ def _rank_pairs(
             endpoint_stress = bus_stress.get(pair[0], 0.0) + bus_stress.get(pair[1], 0.0)
             # High stress + long hop = physically useful + topology-disruptive
             score = 3.0 * endpoint_stress + 1.5 * hop + length
-            scored.append((-score, pair))
+            scored.append((-score + jitter(), pair))
         return [pair for _, pair in sorted(scored)]
 
     # community_bridging
@@ -157,7 +182,7 @@ def _rank_pairs(
         hop = nx.shortest_path_length(graph, *pair)
         length = _distance(coords[pair[0]], coords[pair[1]])
         score = (4.0 if different_communities else 0.0) + hop + length
-        scored.append((-score, pair))
+        scored.append((-score + jitter(), pair))
     return [pair for _, pair in sorted(scored)]
 
 
