@@ -187,13 +187,156 @@ def _budget_curve(grid_values: np.ndarray, grid_worst: float) -> list[dict[str, 
     return curve
 
 
+def _coordinate(record: dict[str, object]) -> tuple[float, float, float]:
+    return (
+        float(record["load_scale"]),
+        float(record["generation_scale"]),
+        float(record["line_capacity_scale"]),
+    )
+
+
+def _monotonicity(records: list[dict[str, object]]) -> dict[str, object]:
+    """Congestion should rise with load and fall with generation and capacity.
+
+    If it does, the worst case over the box sits at a corner and any scenario
+    set containing that corner finds it exactly -- a structural statement the
+    grid alone cannot make. Violations are reported with their magnitude so a
+    MIP-gap artifact is not mistaken for real non-monotonicity.
+    """
+    by_point = {_coordinate(r): float(r["congestion_mw"]) for r in records}
+    axes = [sorted({point[index] for point in by_point}) for index in range(3)]
+    expectations = [("load_scale", 1), ("generation_scale", -1), ("line_capacity_scale", -1)]
+    report: dict[str, object] = {}
+    for index, (name, direction) in enumerate(expectations):
+        others = [axes[other] for other in range(3) if other != index]
+        other_indices = [other for other in range(3) if other != index]
+        violations, comparisons, largest = 0, 0, 0.0
+        for combination in product(*others):
+            series = []
+            for value in axes[index]:
+                key = [0.0, 0.0, 0.0]
+                key[index] = value
+                for slot, other_value in zip(other_indices, combination, strict=True):
+                    key[slot] = other_value
+                point = tuple(key)
+                if point in by_point:
+                    series.append(by_point[point])
+            for left, right in zip(series, series[1:], strict=False):
+                comparisons += 1
+                change = (right - left) * direction
+                if change < -1e-9:
+                    violations += 1
+                    largest = max(largest, -change)
+        report[name] = {
+            "expected": "increasing" if direction > 0 else "decreasing",
+            "violations": violations,
+            "comparisons": comparisons,
+            "largest_violation_mw": largest,
+        }
+    return report
+
+
+def _summarize(
+    records: list[dict[str, object]], scenarios: list[Scenario]
+) -> dict[str, object]:
+    """Grid worst vs five-point worst, per configuration.
+
+    Deduplicates by coordinate first: a scenario point can coincide with a grid
+    node, and the duplicate silently double-counts that scenario's probability
+    in the weighted mean (it moved status_quo from 26.459 to 26.679 before this
+    was caught).
+    """
+    five_point_keys = {
+        (s.load_scale, s.generation_scale, s.line_capacity_scale) for s in scenarios
+    }
+    summary: dict[str, object] = {}
+    for label in CONFIGURATIONS:
+        deduplicated: dict[tuple[float, float, float], dict[str, object]] = {}
+        for record in records:
+            if record["configuration"] == label:
+                deduplicated[_coordinate(record)] = record
+        subset = list(deduplicated.values())
+
+        grid_records = [r for r in subset if _coordinate(r) not in five_point_keys]
+        grid_values = np.array([float(r["congestion_mw"]) for r in grid_records])
+        grid_worst = float(grid_values.max())
+        worst_point = max(grid_records, key=lambda r: float(r["congestion_mw"]))
+
+        # One lookup per scenario, so each probability is counted exactly once.
+        by_point = {_coordinate(r): float(r["congestion_mw"]) for r in subset}
+        five_point_values = {
+            s.name: by_point[(s.load_scale, s.generation_scale, s.line_capacity_scale)]
+            for s in scenarios
+        }
+        weighted = sum(s.probability * five_point_values[s.name] for s in scenarios)
+        sampled_worst = max(five_point_values.values())
+
+        not_optimal = sum(1 for r in subset if r["termination_status"] != "OPTIMAL")
+        summary[label] = {
+            "weighted_five_point_mw": weighted,
+            "sampled_worst_of_five_mw": sampled_worst,
+            "grid_worst_mw": grid_worst,
+            "grid_points": int(grid_values.size),
+            "under_report_vs_five_point_worst": (
+                (grid_worst - sampled_worst) / grid_worst if grid_worst > 0 else 0.0
+            ),
+            "under_report_vs_weighted": (
+                (grid_worst - weighted) / grid_worst if grid_worst > 0 else 0.0
+            ),
+            "grid_worst_at": dict(
+                zip(
+                    ("load_scale", "generation_scale", "line_capacity_scale"),
+                    _coordinate(worst_point),
+                    strict=True,
+                )
+            ),
+            # Load-bearing caveat: a TIME_LIMIT evaluation returns a feasible
+            # incumbent, so its congestion is an upper bound on what the
+            # operator could achieve at that point. It can overstate the worst
+            # case, never understate it.
+            "solves_not_proven_optimal": not_optimal,
+            "solves_total": len(subset),
+            "monotonicity": _monotonicity(subset),
+            "budget_curve": _budget_curve(grid_values, grid_worst),
+        }
+        logger.info(
+            "%-20s weighted=%.3f  five-point worst=%.3f  grid worst=%.3f (%d pts) "
+            "-> under-report %.1f%%  [%d/%d solves not proven optimal]",
+            label,
+            weighted,
+            sampled_worst,
+            grid_worst,
+            grid_values.size,
+            100.0 * float(summary[label]["under_report_vs_five_point_worst"]),
+            not_optimal,
+            len(subset),
+        )
+    return summary
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--grid", default="9,9,5", help="points per axis: load,gen,capacity")
     parser.add_argument("--workers", type=int, default=10)
     parser.add_argument("--eval-time-limit", type=float, default=120.0)
+    parser.add_argument(
+        "--resummarize",
+        default="",
+        help="recompute the summary from an existing record's evaluations, no solves",
+    )
     parser.add_argument("--out", default="")
     args = parser.parse_args()
+
+    if args.resummarize:
+        source = Path(args.resummarize)
+        existing = json.loads(source.read_text())
+        scenarios = build_scenario_set(existing["scenario_kind"])
+        existing["summary"] = _summarize(existing["evaluations"], scenarios)
+        existing["run"]["resummarized_utc"] = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        destination = Path(args.out) if args.out else source
+        destination.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n")
+        logger.info("rewrote summary in %s", destination)
+        return
 
     counts = [int(part) for part in args.grid.split(",")]
     if len(counts) != 3 or any(count < 2 for count in counts):
@@ -230,62 +373,7 @@ def main() -> None:
         records = list(pool.map(_evaluate, jobs, chunksize=4))
     logger.info("evaluations complete")
 
-    five_point_keys = {
-        (s.load_scale, s.generation_scale, s.line_capacity_scale) for s in scenarios
-    }
-    summary: dict[str, object] = {}
-    for label in CONFIGURATIONS:
-        subset = [r for r in records if r["configuration"] == label]
-        grid_records = [
-            r
-            for r in subset
-            if (r["load_scale"], r["generation_scale"], r["line_capacity_scale"])
-            not in five_point_keys
-        ]
-        five_point = [
-            r
-            for r in subset
-            if (r["load_scale"], r["generation_scale"], r["line_capacity_scale"])
-            in five_point_keys
-        ]
-        grid_values = np.array([r["congestion_mw"] for r in grid_records], dtype=float)
-        grid_worst = float(grid_values.max())
-        sampled_worst = max(float(r["congestion_mw"]) for r in five_point)
-        weighted = sum(
-            s.probability * float(r["congestion_mw"])
-            for s in scenarios
-            for r in five_point
-            if (r["load_scale"], r["generation_scale"], r["line_capacity_scale"])
-            == (s.load_scale, s.generation_scale, s.line_capacity_scale)
-        )
-        worst_point = max(grid_records, key=lambda r: r["congestion_mw"])
-        summary[label] = {
-            "weighted_five_point_mw": weighted,
-            "sampled_worst_of_five_mw": sampled_worst,
-            "grid_worst_mw": grid_worst,
-            "grid_points": int(grid_values.size),
-            "under_report_vs_five_point_worst": (
-                (grid_worst - sampled_worst) / grid_worst if grid_worst > 0 else 0.0
-            ),
-            "under_report_vs_weighted": (
-                (grid_worst - weighted) / grid_worst if grid_worst > 0 else 0.0
-            ),
-            "grid_worst_at": {
-                "load_scale": worst_point["load_scale"],
-                "generation_scale": worst_point["generation_scale"],
-                "line_capacity_scale": worst_point["line_capacity_scale"],
-            },
-            "budget_curve": _budget_curve(grid_values, grid_worst),
-        }
-        logger.info(
-            "%-11s weighted=%.3f  five-point worst=%.3f  grid worst=%.3f "
-            "-> five points under-report the worst case by %.1f%%",
-            label,
-            weighted,
-            sampled_worst,
-            grid_worst,
-            100.0 * summary[label]["under_report_vs_five_point_worst"],
-        )
+    summary = _summarize(records, scenarios)
 
     record = {
         "feeder": "ieee33",
