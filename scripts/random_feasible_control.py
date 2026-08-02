@@ -79,6 +79,14 @@ def main() -> None:
     parser.add_argument("--seeds", default="7")
     parser.add_argument("--neighborhood", type=int, default=20)
     parser.add_argument("--depth", type=int, default=2)
+    parser.add_argument(
+        "--max-new-lines",
+        type=int,
+        default=3,
+        help="Layer A build budget K. The cop mixer's Hamming weight follows "
+        "from it, and |subspace| = C(n, w) -- raise K to test whether cop-QAOA "
+        "beats random-feasible when the subspace is NOT near-exhaustible.",
+    )
     parser.add_argument("--out", default="")
     args = parser.parse_args()
 
@@ -96,7 +104,7 @@ def main() -> None:
     net = load_distribution_feeder("ieee33")
     scenarios = build_scenario_set(SCENARIO_KIND)
     config = ExpansionProblemConfig(
-        max_new_lines=3,
+        max_new_lines=args.max_new_lines,
         time_limit_s=args.time_limit,
         n_scenarios_aggregated=3,
         enable_reconfiguration=True,
@@ -189,6 +197,7 @@ def main() -> None:
                 },
                 "run": {
                     "time_limit_s": args.time_limit,
+                    "max_new_lines": args.max_new_lines,
                     "git_commit": _git_commit(),
                     "timestamp_utc": stamp,
                     "note": "cop-QAOA searches ONLY the fixed-weight subspace; if "
