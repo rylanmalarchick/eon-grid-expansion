@@ -46,7 +46,15 @@ def test_indexed_path_exists(relative: str) -> None:
 
 
 def test_every_figure_in_the_index_exists() -> None:
+    """Figures are generated, not tracked (experiments/figures is ignored), so
+    a fresh clone legitimately has none. When they HAVE been generated, the
+    index must name the ones that exist -- that is when it can go stale."""
     figures = set(re.findall(r"`([a-z0-9_]+\.pdf)`", _INDEX.read_text()))
     assert figures, "the index names no figures; did the table change shape?"
+    directory = _ROOT / "experiments" / "figures"
+    if not directory.exists() or not any(directory.glob("*.pdf")):
+        pytest.skip("figures not generated in this checkout")
     for figure in figures:
-        assert (_ROOT / "experiments" / "figures" / figure).exists(), figure
+        assert (directory / figure).exists(), (
+            f"{figure} is named by the index but was not generated"
+        )
