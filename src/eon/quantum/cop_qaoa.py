@@ -189,6 +189,7 @@ def run_constrained_qaoa_depths(
     nelder_mead_evals: int = 60,
     energy_vector: np.ndarray | None = None,
     seed: int = 7,
+    penalty_mode: str = "flat",
 ) -> list[QAOARunResult]:
     """cop-QAOA at depths 1..p with per-depth angle optimization (the shared
     grid+INTERP+Nelder-Mead schedule, same budget as the vanilla baseline).
@@ -200,7 +201,11 @@ def run_constrained_qaoa_depths(
         simulate_qaoa,
     )
 
-    energies = energy_vector if energy_vector is not None else _energy_vector(surrogate)
+    energies = (
+        energy_vector
+        if energy_vector is not None
+        else build_energy_vector(surrogate, penalty_mode=penalty_mode)
+    )
     n = len(surrogate.variables)
     initial = _uniform_weight_state(n, _target_hamming_weight(surrogate))
 

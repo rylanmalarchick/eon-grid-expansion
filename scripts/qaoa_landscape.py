@@ -151,6 +151,14 @@ def main() -> None:
     parser.add_argument("--nm-evals", type=int, default=60)
     parser.add_argument("--seeds", default="7,24")
     parser.add_argument("--out", default="")
+    parser.add_argument(
+        "--penalty-mode",
+        default="flat",
+        choices=("flat", "quadratic"),
+        help="Cardinality encoding scored by the QAOA runs. 'flat' is the "
+        "pre-2026-08-01 default (a plateau: no gradient toward feasibility); "
+        "'quadratic' is the standard Hess penalty and the FAIR baseline.",
+    )
     parser.add_argument("--log-file", default="")
     parser.add_argument(
         "--append",
@@ -181,6 +189,7 @@ def main() -> None:
         "nm_evals": args.nm_evals,
         "git_commit": _git_commit(),
         "timestamp_utc": stamp,
+        "penalty_mode": args.penalty_mode,
     }
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
 
@@ -227,7 +236,7 @@ def main() -> None:
     with out_path.open("a" if args.append else "w") as out:
         for instance_id, surrogate, constrained, instance_seed in jobs:
             logger.info("instance %s: building energy vector", instance_id)
-            energies = build_energy_vector(surrogate)
+            energies = build_energy_vector(surrogate, penalty_mode=args.penalty_mode)
             exact_optimum = float(energies.min())
             # The big-M cardinality penalty is a single flat addend, not scaled
             # by violation size, so assert the argmin really is feasible before

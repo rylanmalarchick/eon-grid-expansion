@@ -147,6 +147,7 @@ def run_penalty_qaoa(
     relaxation_time_limit_s: float = 60.0,
     energies: np.ndarray | None = None,
     seed: int = 7,
+    penalty_mode: str = "flat",
 ) -> list[QAOARunResult]:
     """Run vanilla (or warm-started) penalty-QAOA at depths 1..p; one
     QAOARunResult per depth, angles from the shared optimizer. Simulation is
@@ -154,7 +155,7 @@ def run_penalty_qaoa(
     the 2^n DiagonalGate and is intractable at n=20; the Qiskit circuit
     builder above stays as the exportable artifact and small-n cross-check."""
     if energies is None:
-        energies = build_energy_vector(surrogate)
+        energies = build_energy_vector(surrogate, penalty_mode=penalty_mode)
     validate_finite_array(energies, name="penalty_qaoa_energy_vector")
     n = len(surrogate.variables)
     thetas = None
