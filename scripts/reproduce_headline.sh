@@ -44,6 +44,21 @@ case "${MODE}" in
 esac
 
 PY="${PYTHON:-python}"
+
+# Preflight. Without this the script prints "== 1/11" and then dies on
+# "python: command not found" -- eleven steps of work abandoned after the
+# banner, which is exactly the failure a reproduction script must not have.
+if ! command -v "${PY}" >/dev/null 2>&1; then
+  echo "ERROR: interpreter '${PY}' not found." >&2
+  echo "  Activate the project environment, or set PYTHON=/path/to/python." >&2
+  exit 1
+fi
+if ! "${PY}" -c "import eon" >/dev/null 2>&1; then
+  echo "ERROR: '${PY}' cannot import the eon package." >&2
+  echo "  Install it first:  pip install -e '.[dev]'" >&2
+  exit 1
+fi
+echo "== interpreter: $(command -v "${PY}")"
 echo "== reproduce_headline mode=${MODE} -> ${OUT}"
 
 echo "== 1/11 feeder hardness (reconfiguration ON vs OFF, IEEE 33)"
