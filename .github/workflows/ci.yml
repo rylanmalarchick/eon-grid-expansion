@@ -1,0 +1,48 @@
+name: ci
+
+# The reviewer's scenario, checked on every push: a machine with no Gurobi
+# licence, no local packages, and nothing preinstalled. The suite must install,
+# import, and run there -- with the solver-dependent tests skipping by name
+# rather than erroring.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Types
+        run: mypy src
+
+      - name: Tests
+        # -rs prints the skip reasons, so a green run still shows exactly what
+        # did not execute. A summary that hides its skips is how "passing" comes
+        # to mean less than it appears to.
+        run: pytest -q -rs tests/
+
+      - name: Assert the solver-dependent tests skipped rather than vanished
+        run: |
+          set -euo pipefail
+          marked=$(pytest --collect-only -q -m requires_gurobi tests/ 2>/dev/null | grep -c "::" || true)
+          echo "tests carrying requires_gurobi: ${marked}"
+          if [ "${marked}" -lt 1 ]; then
+            echo "ERROR: no test carries requires_gurobi -- the marker was lost," >&2
+            echo "       so solver-dependent tests would silently stop running." >&2
+            exit 1
+          fi
