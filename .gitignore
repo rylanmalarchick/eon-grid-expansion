@@ -38,3 +38,6 @@ experiments/figures/
 # paper build artifacts (proposal.pdf IS tracked -- it is the deliverable)
 paper/.pytest_cache/
 paper/.lint.tex
+
+# the proposal lives at ../paper with its own local-only repo
+paper/
