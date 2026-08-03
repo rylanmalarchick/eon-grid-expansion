@@ -106,9 +106,25 @@ ${PY} scripts/qiskit_validation.py --shots 4096 --depth 2 \
   --out "${OUT}/qiskit_validation.json"
 
 echo "== 10/11 hardness figure (S1 family)"
-${PY} scripts/make_hardness_figure.py \
-  --on "${OUT}"/s1_proper/*.jsonl --off "${OUT}"/s1_proper_off/*.jsonl \
-  --out-dir "${OUT}/figures" || echo "   (skipped: no s1_proper records in this run)"
+# The instance family is a SEPARATE sweep -- 12 Layer A solves at 1800 s each,
+# far too slow to sit inside this pipeline -- so its records live in their
+# canonical location, not this run's output directory. Skip cleanly when they
+# are absent; the previous version pointed at "${OUT}"/s1_proper and printed a
+# FileNotFoundError traceback on every clean run, which reads as breakage.
+S1_ON="experiments/results/s1_proper"
+S1_OFF="experiments/results/s1_proper_off"
+if compgen -G "${S1_ON}/*.jsonl" > /dev/null; then
+  OFF_ARGS=""
+  if compgen -G "${S1_OFF}/*.jsonl" > /dev/null; then
+    OFF_ARGS="--off ${S1_OFF}/*.jsonl"
+  fi
+  # shellcheck disable=SC2086
+  ${PY} scripts/make_hardness_figure.py \
+    --on ${S1_ON}/*.jsonl ${OFF_ARGS} --out-dir "${OUT}/figures"
+else
+  echo "   skipped: no records in ${S1_ON}"
+  echo "   generate them with scripts/reconfiguration_sweep.py (see docs/results_index.md)"
+fi
 
 echo "== 11/11 figures"
 ${PY} scripts/make_landscape_figure.py --results "${OUT}/landscape.jsonl" \
