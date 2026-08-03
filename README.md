@@ -1,7 +1,7 @@
 # Quantum-enabled distribution-grid expansion planning
 
-Code for the E.ON track of the 2026 Global Quantum + AI Challenge. Everything
-reported in the Phase I proposal is produced by a script in this repository.
+Code for the E.ON track of the 2026 Global Quantum + AI Challenge. A script in
+this repository produces every number in the proposal.
 
 ## Start here
 
@@ -12,90 +12,87 @@ pytest -q tests/                      # full suite; no solver licence needed
 python scripts/qiskit_validation.py   # runs the quantum path end to end
 ```
 
-The only optional dependency is Gurobi. Without a licence the package still
-installs, imports, and runs its full non-solver suite; the Layer A tests skip
-with a named reason rather than failing, so the summary shows exactly what did
-not run. Anything that needs Gurobi says so with a clear message rather than a
-stack trace.
+Gurobi is the only optional dependency. Without a licence the package still
+installs, imports, and runs the full non-solver suite. The Layer A tests skip
+and name the reason, so the summary shows what did not run. Code that needs
+Gurobi reports a clear message instead of a stack trace.
 
-There are no dependencies outside the public indexes. Numerical validation and
-provenance recording live in `eon._checks`; the Julia drivers carry their own
-inlined checks. Both used to come from a local package pinned by absolute path,
-which meant nobody but its author could run them.
+No dependency comes from outside the public package indexes. The numerical
+checks and the provenance records live in `eon._checks`. The Julia drivers
+carry their own copies of the same checks.
 
 ## The two layers
 
-**Layer A** (`eon.formulations.lindistflow`) is the planning model: a
+**Layer A** (`eon.formulations.lindistflow`) is the planning model. It is a
 multi-scenario LinDistFlow expansion MILP with joint network reconfiguration
-under a radiality constraint. This is where the physics lives and where hardness
-is established.
+under a radiality constraint. The physics lives here. Hardness is measured here.
 
 **Layer B** (`eon.formulations.layer_b`, `eon.formulations.qubo`) is a reduced
-binary QUBO surrogate over the neighbourhood of a Layer A solution. It exists so
-a NISQ-sized instance can be studied at all. Every quantum number is a statement
-about Layer B, never about grid planning directly.
+binary QUBO surrogate over the neighborhood of a Layer A solution. It exists so
+that a NISQ-sized instance can be studied. Every quantum number describes Layer
+B, never grid planning directly.
 
-| Package | What is in it |
+| Package | Contents |
 |---|---|
 | `eon.formulations` | LinDistFlow MILP, Layer B surrogate, QUBO compilation |
 | `eon.instances` | feeders, candidate generation, scenarios, external benchmarks |
-| `eon.quantum` | QAOA engine, mixers, circuit export, decomposition + certificate |
+| `eon.quantum` | QAOA engine, mixers, circuit export, decomposition, certificate |
 | `eon.mps` | matrix-product-state protocol and the exact tensor-network control |
 | `eon.classical` | Gurobi and simulated-annealing baselines |
-| `eon.viz` | the proposal figures |
-| `eon.bibliography` | reading list → BibTeX, with the do-not-cite list enforced |
+| `eon.viz` | proposal figures |
+| `eon.bibliography` | reading list to BibTeX, with the do-not-cite list enforced |
 
-## Reproducing the results
+## Reproduce the results
 
 ```bash
 ./scripts/reproduce_headline.sh quick   # wiring check, minutes
 ./scripts/reproduce_headline.sh full    # the reported numbers, hours
 ```
 
-Eleven steps, from feeder hardness through to the figures. **Quick-mode numbers
-are a wiring check and must never be quoted** — the time limits are far too
-short to reproduce anything. Full mode uses the honest solve times.
+The script runs eleven steps, from feeder hardness to the figures. Quick mode
+uses short time limits and checks the wiring only. **Do not quote a quick-mode
+number.** Full mode uses the real solve times and reproduces the proposal.
 
-## Validating in Qiskit
+## Validate in Qiskit
 
-`docs/qiskit_validation.md` is the entry point for checking our results
-independently. In short: `scripts/qiskit_validation.py` builds the gate-level
-circuit, runs it on Aer, decodes the counts into line sets, and compares the
-resulting expectation value against our exact simulation engine. Agreement
-within sampling error establishes that the exported circuit is the algorithm we
-benchmarked. The script exits non-zero if the two engines disagree, and writes
-OpenQASM 3 alongside its result.
+Read `docs/qiskit_validation.md` first. `scripts/qiskit_validation.py` builds
+the gate-level circuit, runs it on Aer, and decodes the counts into line sets.
+It then compares the resulting expectation value against the exact simulation
+engine. Agreement within sampling error shows that the exported circuit is the
+algorithm we benchmarked. The script exits non-zero when the two engines
+disagree. It also writes the OpenQASM 3 circuit next to its result.
 
-## What is proved and what is measured
+## Proved and measured
 
-Two results are machine-checked in Lean 4 (`lean/`, core Lean 4, no mathlib):
+Lean 4 checks two results. Both files use core Lean 4 without mathlib.
 
-- `PosiformPlanting.lean` — the planted-optimum argument behind the synthetic
-  benchmark generator.
-- `DroppedCouplingBound.lean` — soundness of the decomposition certificate's
-  lower bound.
+- `lean/PosiformPlanting.lean` proves the planted-optimum argument behind the
+  synthetic benchmark generator.
+- `lean/DroppedCouplingBound.lean` proves that the decomposition certificate
+  lower bound is sound.
 
-Both carry an in-file axiom audit and contain no `sorry`. Everything else here
-is empirical and is reported as measurement, never as guarantee.
+Each file ends with an axiom audit and contains no `sorry`. Run one with
+`lean lean/DroppedCouplingBound.lean` (Lean 4.32).
 
-Run them with `lean lean/DroppedCouplingBound.lean` (Lean 4.32).
+Everything else in this repository is measured, not proved. Reports state it as
+measurement, never as a guarantee.
 
-## Conventions worth knowing before reading the code
+## Conventions
 
 - **Bound kinds are types.** `eon.quantum.bounds` separates
-  `CertifiedLowerBound` from `HeuristicIncumbent`, and only the pair builds a
-  `ClassicalDecompositionGap`. A proven bound and an achieved one are both a
-  float, and using one where the other belongs makes a certificate look tighter
-  than it is.
+  `CertifiedLowerBound` from `HeuristicIncumbent`. Only the pair builds a
+  `ClassicalDecompositionGap`. A proved bound and an achieved bound are both a
+  float. Using one where the other belongs makes a certificate look tighter than
+  it is.
 - **The certified gap is classical.** It measures the decomposition and
-  integrality gap of the classical wrapper. It is not a quantum-versus-classical
-  advantage measurement.
-- **Toggle space vs build space.** Layer B variables are *toggles* relative to
-  the Layer A incumbent; bit `i` of a basis index is build `i`. The two spaces
-  are easy to confuse and several functions convert between them explicitly.
+  integrality gap of the classical wrapper. It does not measure quantum
+  advantage.
+- **Toggle space and build space differ.** Layer B variables are toggles
+  relative to the Layer A incumbent. Bit `i` of a basis index is build `i`.
+  Several functions convert between the two spaces explicitly.
 - **Penalty mode is explicit.** `build_energy_vector(..., penalty_mode=...)`
-  selects `flat`, `quadratic`, or `none`. A flat penalty is a plateau and gives
-  a variational method no gradient toward feasibility; the fair comparison uses
+  takes `flat`, `quadratic`, or `none`. A flat penalty is a plateau and gives a
+  variational method no gradient toward feasibility. The fair comparison uses
   `quadratic`.
 
 ## Development
@@ -104,7 +101,6 @@ Run them with `lean lean/DroppedCouplingBound.lean` (Lean 4.32).
 pytest -q tests/ && ruff check . && mypy src
 ```
 
-All three must be clean. Tests assert against real behaviour rather than mocks,
-and several exist specifically as negative controls — they check that a
-detector fires on the bug it was written for, because a check that cannot fail
-is not a check.
+All three must pass. The tests assert against real behavior and do not use
+mocks. Several tests are negative controls. Each one checks that a detector
+fires on the bug it was written for. A check that cannot fail is not a check.

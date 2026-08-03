@@ -1,8 +1,9 @@
 # Where every reported number comes from
 
-The proposal claims that each of its numbers is produced by a script here. This
-table is that claim made checkable: for each headline result, the script that
-produces it, the artifact it writes, and the figure it feeds.
+The proposal states that a script in this repository produces each of its
+numbers. This table makes that statement checkable. For each headline result it
+names the script, the artifact the script writes, and the figure the artifact
+feeds.
 
 Paths are relative to `workspace/`. `./scripts/reproduce_headline.sh full`
 regenerates the whole set in order.
@@ -32,17 +33,20 @@ regenerates the whole set in order.
 | Planted optimum is a global minimum of the posiform | `lean/PosiformPlanting.lean` | `lean lean/PosiformPlanting.lean` |
 | Decomposition lower bound never exceeds any assignment's energy | `lean/DroppedCouplingBound.lean` | `lean lean/DroppedCouplingBound.lean`; brute-forced by `tests/test_dropped_coupling_bound.py` |
 
-Both files end with an axiom audit and contain no `sorry`.
+Each file ends with an axiom audit and contains no `sorry`.
 
 ## Citations
 
-`scripts/audit_citations.py` checks every DOI-bearing entry's title against the
-Crossref record and cross-references which keys the proposal actually cites. It
-exits non-zero on a mismatch. arXiv-only entries are verified by hand and listed
-in its output, since the arXiv API refuses scripted access from here.
+`scripts/audit_citations.py` checks the title of every DOI entry against the
+Crossref record. It also lists the keys the proposal cites. The script exits
+non-zero on a mismatch.
 
-## A caution on quick mode
+The arXiv API refuses scripted access from this environment. A person therefore
+verifies the arXiv-only entries by hand. The script lists them, so the unchecked
+set stays visible.
 
-`reproduce_headline.sh quick` exists to check the wiring, not to reproduce
-results: its time limits are far too short. Quick-mode numbers must never be
-quoted. Only `full` mode reproduces what the proposal reports.
+## Quick mode
+
+`reproduce_headline.sh quick` checks the wiring. It does not reproduce results.
+Its time limits are far too short. **Do not quote a quick-mode number.** Only
+`full` mode reproduces what the proposal reports.
