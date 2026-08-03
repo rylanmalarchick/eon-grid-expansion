@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument("--reading", default="../reading.txt")
     parser.add_argument(
         "--proposal",
-        default="../paper/proposal.md",
+        default="paper/proposal.md",
         help="cross-reference which keys the document actually cites",
     )
     parser.add_argument("--timeout", type=float, default=40.0)

@@ -34,3 +34,7 @@ julia/*.cov
 ibm_token*
 iqm_token*
 experiments/figures/
+
+# paper build artifacts (proposal.pdf IS tracked -- it is the deliverable)
+paper/.pytest_cache/
+paper/.lint.tex
