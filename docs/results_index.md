@@ -17,6 +17,7 @@ regenerates the whole set in order.
 | Reconfiguration-off control: optimal in 2.6–6.1 s | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/s1_proper_off/` | `hardness_family.pdf` |
 | 5 of 12 surrogates near-decoupled ($\|J\|/\|h\| \approx 1$) | (same records as above) | `experiments/results/s1_proper/` | `hardness_family.pdf` |
 | Scale tier: dense glasses open at 1 h, exact TN cannot contract | `scripts/pathb_spine.py` | `experiments/results/pathb_dense_1h/` | — |
+| MPS 67 % above the classical incumbent at $n=120$ (fixed angles) | `scripts/scale_mps_sweep.py` | `experiments/results/scale_mps_n120_probe/sweep.jsonl` | — |
 | MPS within 1.2 % of optimum by $p=2$ at $n=20$ | `scripts/scale_mps_sweep.py` | `experiments/results/mps_higherp/` | — |
 | Random-feasible control: optimum in 24/25 repeats; cop does not beat the median | `scripts/random_feasible_control.py` | `experiments/results/s3_control/control.jsonl` | — |
 | Transpiled depth 1,118 vs 3,812,541 (≈3,400×) | `scripts/transpile_table.py` | `experiments/results/s4_transpile/table.json` | — |
