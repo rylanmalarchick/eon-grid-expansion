@@ -89,6 +89,14 @@ def main() -> None:
         "--hamming-weight to set the subspace directly.",
     )
     parser.add_argument(
+        "--hamming-weights",
+        default=None,
+        help="Comma-separated weights swept in ONE Layer A solve, e.g. 2,3,4,6,8. "
+        "The Layer A solve dominates runtime and does not depend on the weight, "
+        "so a sweep is nearly free and traces cop-QAOA's advantage as a function "
+        "of shot coverage instead of asserting it at a single point.",
+    )
+    parser.add_argument(
         "--hamming-weight",
         type=int,
         default=None,
@@ -139,96 +147,117 @@ def main() -> None:
             )
             energies = build_energy_vector(surrogate)
             n = len(surrogate.variables)
-            weight = _target_hamming_weight(
-                surrogate, override=args.hamming_weight
-            )
-            subspace = _fixed_weight_states(n, weight)
-            subspace_energies = energies[subspace]
-            subspace_size = len(subspace)
-            exact_optimum = float(energies.min())
-            subspace_optimum = float(subspace_energies.min())
+            if args.hamming_weights:
+                sweep = [int(w) for w in args.hamming_weights.split(",") if w.strip()]
+            else:
+                sweep = [args.hamming_weight]
+            # The Layer A solve above is weight-independent, so every weight
+            # in the sweep reuses it.
+            for weight_override in sweep:
+                weight = _target_hamming_weight(
+                    surrogate, override=weight_override
+                )
+                subspace = _fixed_weight_states(n, weight)
+                subspace_energies = energies[subspace]
+                subspace_size = len(subspace)
+                exact_optimum = float(energies.min())
+                subspace_optimum = float(subspace_energies.min())
 
-            # Expected distinct states drawn in `shots` uniform draws with
-            # replacement: N * (1 - (1 - 1/N)^shots).
-            coverage = 1.0 - (1.0 - 1.0 / subspace_size) ** args.shots
-            logger.info(
-                "n=%d weight=%d |subspace|=C(%d,%d)=%d shots=%d expected coverage=%.1f%%",
-                n, weight, n, weight, subspace_size, args.shots, 100 * coverage,
-            )
+                # Expected distinct states drawn in `shots` uniform draws with
+                # replacement: N * (1 - (1 - 1/N)^shots).
+                coverage = 1.0 - (1.0 - 1.0 / subspace_size) ** args.shots
+                logger.info(
+                    "n=%d weight=%d |subspace|=C(%d,%d)=%d shots=%d expected coverage=%.1f%%",
+                    n, weight, n, weight, subspace_size, args.shots, 100 * coverage,
+                )
 
-            rng = np.random.default_rng(seed)
-            random_best = [
-                float(subspace_energies[rng.integers(0, subspace_size, size=args.shots)].min())
-                for _ in range(args.repeats)
-            ]
+                rng = np.random.default_rng(seed)
+                random_best = [
+                    float(subspace_energies[rng.integers(0, subspace_size, size=args.shots)].min())
+                    for _ in range(args.repeats)
+                ]
 
-            logger.info("running cop-QAOA depths 1..%d", args.depth)
-            cop_results = run_constrained_qaoa_depths(
-                surrogate,
-                p=args.depth,
-                shots=args.shots,
-                energy_vector=energies,
-                seed=seed,
-                hamming_weight=args.hamming_weight,
-            )
-            cop_best = {
-                r.p: float(r.best_sample.objective) for r in cop_results
-            }
+                logger.info("running cop-QAOA depths 1..%d", args.depth)
+                cop_results = run_constrained_qaoa_depths(
+                    surrogate,
+                    p=args.depth,
+                    shots=args.shots,
+                    energy_vector=energies,
+                    seed=seed,
+                    # MUST be the swept weight, not the flag: passing the
+                    # flag made cop search the derived w=2 subspace while
+                    # the record reported w=6 statistics beside it.
+                    hamming_weight=weight_override,
+                )
+                # Score cop on the SAME vector random_best is drawn from.
+                # best_sample.objective is the UNPENALIZED surrogate objective,
+                # and at weights above the build budget every cop sample is
+                # infeasible -- so cop was credited with an unpenalized score
+                # while random paid the penalty, and cop "won" by construction.
+                # It even reported an excess BELOW the exact optimum, which is
+                # impossible against a true minimum.
+                def _scored(result: object) -> float:
+                    return min(
+                        float(energies[int(bits[::-1], 2)])
+                        for bits in result.counts  # type: ignore[attr-defined]
+                    )
 
-            scale = max(abs(exact_optimum), 1.0)
-            record = {
-                "instance_id": f"ieee33:community_bridging:seed{seed}:n{n}",
-                "layer_a": {
-                    "termination_status": layer_a.termination_status,
-                    "mip_gap": layer_a.mip_gap,
-                },
-                "subspace": {
-                    "variable_count": n,
-                    "hamming_weight": weight,
-                    "weight_source": (
-                        "imposed" if args.hamming_weight is not None else "derived"
-                    ),
-                    "size": subspace_size,
-                    "shots": args.shots,
-                    "expected_coverage_fraction": coverage,
-                    "shots_exceed_subspace": args.shots >= subspace_size,
-                },
-                "exact_optimum": exact_optimum,
-                "subspace_optimum": subspace_optimum,
-                "random_feasible": {
-                    "repeats": args.repeats,
-                    "median_best": float(np.median(random_best)),
-                    "worst_best": float(np.max(random_best)),
-                    "found_subspace_optimum_fraction": float(
-                        np.mean([abs(b - subspace_optimum) < 1e-9 for b in random_best])
-                    ),
-                },
-                "cop_qaoa_best_by_depth": cop_best,
-                # The verdict: does cop-QAOA beat a uniform draw from its own
-                # search space at the same shot budget?
-                "cop_beats_random_median": {
-                    str(p): bool(v < float(np.median(random_best)) - 1e-9)
-                    for p, v in cop_best.items()
-                },
-                "excess_over_exact": {
-                    "random_median": (float(np.median(random_best)) - exact_optimum) / scale,
-                    **{
-                        f"cop_p{p}": (v - exact_optimum) / scale for p, v in cop_best.items()
+                cop_best = {r.p: _scored(r) for r in cop_results}
+
+                scale = max(abs(exact_optimum), 1.0)
+                record = {
+                    "instance_id": f"ieee33:community_bridging:seed{seed}:n{n}",
+                    "layer_a": {
+                        "termination_status": layer_a.termination_status,
+                        "mip_gap": layer_a.mip_gap,
                     },
-                },
-                "run": {
-                    "time_limit_s": args.time_limit,
-                    "max_new_lines": args.max_new_lines,
-                    "hamming_weight_override": args.hamming_weight,
-                    "git_commit": _git_commit(),
-                    "timestamp_utc": stamp,
-                    "note": "cop-QAOA searches ONLY the fixed-weight subspace; if "
-                    "shots >= |subspace| its optimum-finding is near-exhaustive "
-                    "sampling, not search quality",
-                },
-            }
-            out.write(json.dumps(record, sort_keys=True) + "\n")
-            out.flush()
+                    "subspace": {
+                        "variable_count": n,
+                        "hamming_weight": weight,
+                        "weight_source": (
+                            "imposed" if weight_override is not None else "derived"
+                        ),
+                        "size": subspace_size,
+                        "shots": args.shots,
+                        "expected_coverage_fraction": coverage,
+                        "shots_exceed_subspace": args.shots >= subspace_size,
+                    },
+                    "exact_optimum": exact_optimum,
+                    "subspace_optimum": subspace_optimum,
+                    "random_feasible": {
+                        "repeats": args.repeats,
+                        "median_best": float(np.median(random_best)),
+                        "worst_best": float(np.max(random_best)),
+                        "found_subspace_optimum_fraction": float(
+                            np.mean([abs(b - subspace_optimum) < 1e-9 for b in random_best])
+                        ),
+                    },
+                    "cop_qaoa_best_by_depth": cop_best,
+                    # The verdict: does cop-QAOA beat a uniform draw from its own
+                    # search space at the same shot budget?
+                    "cop_beats_random_median": {
+                        str(p): bool(v < float(np.median(random_best)) - 1e-9)
+                        for p, v in cop_best.items()
+                    },
+                    "excess_over_exact": {
+                        "random_median": (float(np.median(random_best)) - exact_optimum) / scale,
+                        **{
+                            f"cop_p{p}": (v - exact_optimum) / scale for p, v in cop_best.items()
+                        },
+                    },
+                    "run": {
+                        "time_limit_s": args.time_limit,
+                        "max_new_lines": args.max_new_lines,
+                        "hamming_weight_override": weight_override,
+                        "git_commit": _git_commit(),
+                        "timestamp_utc": stamp,
+                        "note": "cop-QAOA searches ONLY the fixed-weight subspace; if "
+                        "shots >= |subspace| its optimum-finding is near-exhaustive "
+                        "sampling, not search quality",
+                    },
+                }
+                out.write(json.dumps(record, sort_keys=True) + "\n")
+                out.flush()
             logger.info(
                 "  -> |subspace|=%d random_median_excess=%.4f cop_p%d_excess=%.4f",
                 subspace_size,
