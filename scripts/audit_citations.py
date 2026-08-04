@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument("--reading", default="../reading.txt")
     parser.add_argument(
         "--proposal",
-        default="paper/proposal.md",
+        default="../paper/proposal.md",
         help="cross-reference which keys the document actually cites",
     )
     parser.add_argument("--timeout", type=float, default=40.0)
@@ -86,7 +86,16 @@ def main() -> None:
 
     cited: set[str] = set()
     proposal = Path(args.proposal)
-    if proposal.exists():
+    if not proposal.exists():
+        # Silence here would be the wrong failure. The cross-reference is the
+        # half of this audit that catches a citation with no entry, so a moved
+        # or renamed proposal must be reported, not quietly skipped.
+        logger.warning(
+            "proposal not found at %s -- SKIPPING the cited-key cross-reference. "
+            "Pass --proposal to point at it.",
+            proposal,
+        )
+    else:
         cited = set(re.findall(r"@(R\d+[ab]?)", proposal.read_text()))
         known = {entry.key for entry in entries}
         dangling = sorted(cited - known)
