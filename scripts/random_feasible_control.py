@@ -83,9 +83,20 @@ def main() -> None:
         "--max-new-lines",
         type=int,
         default=3,
-        help="Layer A build budget K. The cop mixer's Hamming weight follows "
-        "from it, and |subspace| = C(n, w) -- raise K to test whether cop-QAOA "
-        "beats random-feasible when the subspace is NOT near-exhaustible.",
+        help="Layer A build budget K. NOTE: raising this does NOT enlarge the "
+        "cop subspace. The derived Hamming weight is min(n, K, "
+        "base_selected_count), and the incumbent's selected count binds. Use "
+        "--hamming-weight to set the subspace directly.",
+    )
+    parser.add_argument(
+        "--hamming-weight",
+        type=int,
+        default=None,
+        help="Set the cop subspace weight directly, so |subspace| = C(n, w). "
+        "This is how to test whether cop-QAOA beats random-feasible when the "
+        "subspace is NOT near-exhaustible by the shot budget. The cardinality "
+        "is then imposed, not inherited from the Layer A incumbent -- say so "
+        "when reporting.",
     )
     parser.add_argument("--out", default="")
     args = parser.parse_args()
@@ -128,7 +139,9 @@ def main() -> None:
             )
             energies = build_energy_vector(surrogate)
             n = len(surrogate.variables)
-            weight = _target_hamming_weight(surrogate)
+            weight = _target_hamming_weight(
+                surrogate, override=args.hamming_weight
+            )
             subspace = _fixed_weight_states(n, weight)
             subspace_energies = energies[subspace]
             subspace_size = len(subspace)
@@ -151,7 +164,12 @@ def main() -> None:
 
             logger.info("running cop-QAOA depths 1..%d", args.depth)
             cop_results = run_constrained_qaoa_depths(
-                surrogate, p=args.depth, shots=args.shots, energy_vector=energies, seed=seed
+                surrogate,
+                p=args.depth,
+                shots=args.shots,
+                energy_vector=energies,
+                seed=seed,
+                hamming_weight=args.hamming_weight,
             )
             cop_best = {
                 r.p: float(r.best_sample.objective) for r in cop_results
@@ -167,6 +185,9 @@ def main() -> None:
                 "subspace": {
                     "variable_count": n,
                     "hamming_weight": weight,
+                    "weight_source": (
+                        "imposed" if args.hamming_weight is not None else "derived"
+                    ),
                     "size": subspace_size,
                     "shots": args.shots,
                     "expected_coverage_fraction": coverage,
@@ -198,6 +219,7 @@ def main() -> None:
                 "run": {
                     "time_limit_s": args.time_limit,
                     "max_new_lines": args.max_new_lines,
+                    "hamming_weight_override": args.hamming_weight,
                     "git_commit": _git_commit(),
                     "timestamp_utc": stamp,
                     "note": "cop-QAOA searches ONLY the fixed-weight subspace; if "

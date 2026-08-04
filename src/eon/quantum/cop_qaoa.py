@@ -190,6 +190,7 @@ def run_constrained_qaoa_depths(
     energy_vector: np.ndarray | None = None,
     seed: int = 7,
     penalty_mode: str = "flat",
+    hamming_weight: int | None = None,
 ) -> list[QAOARunResult]:
     """cop-QAOA at depths 1..p with per-depth angle optimization (the shared
     grid+INTERP+Nelder-Mead schedule, same budget as the vanilla baseline).
@@ -207,7 +208,9 @@ def run_constrained_qaoa_depths(
         else build_energy_vector(surrogate, penalty_mode=penalty_mode)
     )
     n = len(surrogate.variables)
-    initial = _uniform_weight_state(n, _target_hamming_weight(surrogate))
+    initial = _uniform_weight_state(
+        n, _target_hamming_weight(surrogate, override=hamming_weight)
+    )
 
     def energy_fn(betas: tuple[float, ...], gammas: tuple[float, ...]) -> float:
         state = simulate_qaoa(initial, energies, betas, gammas, mixer="xy_ring")
@@ -244,12 +247,27 @@ def _energy_vector(surrogate: LayerBSurrogate) -> np.ndarray:
     return build_energy_vector(surrogate)
 
 
-def _target_hamming_weight(surrogate: LayerBSurrogate) -> int:
-    # Capped at the variable count: decomposition blocks inherit the parent's
-    # max_new_lines / base_selected_count, which can exceed the block size (an
-    # empty fixed-weight subspace otherwise).
+def _target_hamming_weight(
+    surrogate: LayerBSurrogate, *, override: int | None = None
+) -> int:
+    """Hamming weight of the constrained subspace.
+
+    Derived, the weight is min(n, max_new_lines, base_selected_count). The last
+    term binds in practice: it is however many lines the Layer A incumbent
+    selected, so RAISING THE BUILD BUDGET ALONE CANNOT ENLARGE THE SUBSPACE.
+    An experiment that needs a bigger subspace than the incumbent implies must
+    pass `override` and say that it did.
+
+    Both paths cap at the variable count. A weight above n has an empty
+    subspace, which yields a zero state vector instead of an error.
+    """
+    n = len(surrogate.variables)
+    if override is not None:
+        if override < 1:
+            raise ValueError(f"hamming weight override must be positive, got {override}")
+        return min(n, override)
     return min(
-        len(surrogate.variables),
+        n,
         surrogate.max_new_lines,
         max(1, surrogate.base_selected_count or 1),
     )
