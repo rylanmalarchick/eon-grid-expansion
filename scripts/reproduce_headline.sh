@@ -92,10 +92,18 @@ echo "== 6/11 congestion metrics"
 ${PY} scripts/congestion_metrics.py --time-limit "${LAYER_A_LIMIT}" \
   --eval-time-limit 600 --seed 7 --out "${OUT}/congestion.json"
 
-echo "== 7/11 random-feasible control (S3)"
+echo "== 7/11 random-feasible control (S3), both subspace regimes"
+# The finding needs BOTH runs. At the derived weight the subspace is 190 states
+# against 1024 shots, so sampling is near-exhaustive and cop-QAOA ties a random
+# draw. At weight 6 the subspace is 38,760 states, and the comparison is about
+# search quality rather than coverage. Reporting only one regime misstates the
+# result in whichever direction that regime happens to favor.
 ${PY} scripts/random_feasible_control.py --time-limit "${LAYER_A_LIMIT}" \
   --shots 1024 --repeats 25 --seeds 7 --depth 2 \
   --out "${OUT}/s3_control.jsonl"
+${PY} scripts/random_feasible_control.py --time-limit "${LAYER_A_LIMIT}" \
+  --shots 1024 --repeats 25 --seeds 7 --depth 2 --hamming-weight 6 \
+  --out "${OUT}/s3_control_w6.jsonl"
 
 echo "== 8/11 logical-vs-physical transpile table (S4)"
 ${PY} scripts/transpile_table.py --depth 2 --levels 0,1 \
