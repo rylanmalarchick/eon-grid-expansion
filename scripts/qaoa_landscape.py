@@ -113,12 +113,25 @@ def _result_record(
     algorithm: str,
     result: QAOARunResult,
     *,
+    energies: np.ndarray,
     exact_optimum: float,
     feasible_fraction: float,
     run_meta: dict[str, object],
 ) -> dict[str, object]:
     best = result.best_sample
     scale = max(abs(exact_optimum), 1.0)
+    # Score the sample on the SAME vector exact_optimum came from. best.objective
+    # is the UNPENALIZED surrogate objective, and exact_optimum is the minimum of
+    # the PENALIZED vector, so subtracting one from the other compares different
+    # cost functions. Under the quadratic penalty a feasible sample below the
+    # build budget still pays lambda*(count-K)^2, so the mismatch produced
+    # NEGATIVE excesses -- a sample apparently better than the optimum. It also
+    # favoured whichever method sits furthest from the budget, which is the
+    # constrained mixer, since it is locked to one build count.
+    # decode_counts already reversed the raw key, so bitstring[i] is variable
+    # i. The energy vector's bit i is also variable i, which is
+    # int(bitstring[::-1], 2) -- see tests/test_landscape_scoring.py.
+    best_penalized = float(energies[int(best.bitstring[::-1], 2)])
     return {
         "instance_id": instance_id,
         "algorithm": algorithm,
@@ -129,13 +142,15 @@ def _result_record(
         "exact_optimum": exact_optimum,
         "best_sample": {
             "objective": best.objective,
+            "penalized_energy": best_penalized,
             "feasible": best.feasible,
             "sampling_prob": best.sampling_prob,
             "selected_candidates": list(best.selected_candidates),
         },
         # Best FEASIBLE sampled energy relative to the exact optimum of the
-        # same scored cost object (0 = optimal).
-        "best_sample_excess": (best.objective - exact_optimum) / scale
+        # same scored cost object (0 = optimal). Both sides are the penalized
+        # vector, so this cannot go negative.
+        "best_sample_excess": (best_penalized - exact_optimum) / scale
         if best.feasible
         else None,
         "feasible_fraction": feasible_fraction,
@@ -300,6 +315,7 @@ def main() -> None:
                         instance_id,
                         algorithm,
                         result,
+                        energies=energies,
                         exact_optimum=exact_optimum,
                         feasible_fraction=_feasible_fraction(surrogate, result.counts),
                         run_meta=run_meta,

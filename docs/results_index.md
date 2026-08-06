@@ -25,6 +25,7 @@ regenerates the whole set in order.
 | Aer vs exact engine agree to 0.06 σ | `scripts/qiskit_validation.py` | `experiments/results/qiskit_validation/` | — |
 | D14 certificate sandwiches the planted optimum | `scripts/qaoa_decomposition_run.py` | `experiments/results/qaoa_decomp_v2/` | — |
 | QAOA landscapes, cop vs vanilla vs warm-start | `scripts/qaoa_landscape.py` | `experiments/results/qaoa_p3/` | `p1_landscapes.pdf`, `excess_vs_depth.pdf`, `feasible_fraction_vs_depth.pdf` |
+| Fair baseline: cop 0.0000, warm 0.0000, penalty QAOA 0.89-1.52 | `scripts/qaoa_landscape.py --penalty-mode quadratic` | `experiments/results/p3_quadratic/landscape_corrected.jsonl` | — |
 
 ## Proved, not measured
 
