@@ -70,3 +70,19 @@ def decode_counts(
             )
         )
     return results
+
+
+def state_index(counts_key: str) -> int:
+    """Index into the energy vector for a raw measurement-counts key.
+
+    Qiskit writes qubit 0 as the RIGHTMOST character, and build_energy_vector
+    indexes state s by bit i = variable i, so the key IS the index in base 2 --
+    no reversal. QuantumResult.bitstring is the same key already reversed, so
+    call this with the raw key, not with .bitstring.
+
+    Three separate call sites derived this by hand and one of them reversed
+    twice, silently scoring a different state (energy 4.5 against 24.0 on a
+    10-variable instance). It lives here now, pinned by
+    tests/test_state_index.py.
+    """
+    return int(counts_key, 2)

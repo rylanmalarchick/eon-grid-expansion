@@ -41,6 +41,7 @@ from eon.quantum.cop_qaoa import (
     run_constrained_qaoa_depths,
 )
 from eon.quantum.energy import build_energy_vector
+from eon.quantum.postprocess import state_index
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("random_feasible_control")
@@ -196,10 +197,10 @@ def main() -> None:
                 # while random paid the penalty, and cop "won" by construction.
                 # It even reported an excess BELOW the exact optimum, which is
                 # impossible against a true minimum.
-                def _scored(result: object) -> float:
+                def _scored(result: object, vector: np.ndarray = energies) -> float:
                     return min(
-                        float(energies[int(bits[::-1], 2)])
-                        for bits in result.counts  # type: ignore[attr-defined]
+                        float(vector[state_index(key)])
+                        for key in result.counts  # type: ignore[attr-defined]
                     )
 
                 cop_best = {r.p: _scored(r) for r in cop_results}

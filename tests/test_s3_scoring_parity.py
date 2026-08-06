@@ -21,6 +21,7 @@ import pytest
 from eon.instances.external import build_external_surrogate, generate_fused_planted
 from eon.quantum.cop_qaoa import run_constrained_qaoa_depths
 from eon.quantum.energy import build_energy_vector
+from eon.quantum.postprocess import state_index
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +39,7 @@ def setup():
 
 def _cop_energy_from_counts(counts: dict[str, int], energies: np.ndarray) -> float:
     """Score cop's samples on the SAME vector random is scored on."""
-    return min(float(energies[int(bits[::-1], 2)]) for bits in counts)
+    return min(float(energies[state_index(key)]) for key in counts)
 
 
 def test_no_arm_can_beat_the_global_minimum(setup) -> None:

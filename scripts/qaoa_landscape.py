@@ -48,6 +48,7 @@ from eon.quantum.cop_qaoa import (
     run_constrained_qaoa_depths,
 )
 from eon.quantum.energy import build_energy_vector
+from eon.quantum.postprocess import state_index
 from eon.quantum.qaoa import run_penalty_qaoa
 from eon.quantum.simulator import (
     expected_energy_of_state,
@@ -128,10 +129,9 @@ def _result_record(
     # NEGATIVE excesses -- a sample apparently better than the optimum. It also
     # favoured whichever method sits furthest from the budget, which is the
     # constrained mixer, since it is locked to one build count.
-    # decode_counts already reversed the raw key, so bitstring[i] is variable
-    # i. The energy vector's bit i is also variable i, which is
-    # int(bitstring[::-1], 2) -- see tests/test_landscape_scoring.py.
-    best_penalized = float(energies[int(best.bitstring[::-1], 2)])
+    # bitstring is the raw counts key already reversed by decode_counts, so
+    # reverse it back and use the shared conversion.
+    best_penalized = float(energies[state_index(best.bitstring[::-1])])
     return {
         "instance_id": instance_id,
         "algorithm": algorithm,
