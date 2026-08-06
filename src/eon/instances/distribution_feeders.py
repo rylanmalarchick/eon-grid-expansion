@@ -13,6 +13,11 @@ import pandapower.networks as pn
 from matpowercaseframes import CaseFrames
 from pandapower.converter.pypower import from_ppc
 
+# pandapower 3.5 removed select_subnet from the top-level namespace. The
+# toolbox path works on 3.4 and 3.5 alike, so import it there rather than
+# pinning a release.
+from pandapower.toolbox import select_subnet
+
 IEEE123_MATPOWER_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "ieee123" / "grid_IEEE123_complete.m"
 )
@@ -70,7 +75,7 @@ def _load_mv_oberrhein_feeder(name: str) -> pp.pandapowerNet:
             graph.add_edge(int(row.from_bus), int(row.to_bus))
     component = nx.node_connected_component(graph, source_bus)
 
-    subnet = pp.select_subnet(net, sorted(component), include_results=False)
+    subnet = select_subnet(net, sorted(component), include_results=False)
     # Drop the normally-open tie lines: they belong to the neighboring feeder
     # under this abstraction, and keeping them would silently re-mesh it.
     tie_lines = [index for index in subnet.line.index if int(index) in open_lines]
