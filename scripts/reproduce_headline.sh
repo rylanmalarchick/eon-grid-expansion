@@ -135,6 +135,9 @@ else
 fi
 
 echo "== 11/11 figures"
+${PY} scripts/make_coverage_figure.py \
+  --records "${OUT}"/s3_control.jsonl "${OUT}"/s3_control_w6.jsonl \
+  --out-dir "${OUT}/figures"
 ${PY} scripts/make_landscape_figure.py --results "${OUT}/landscape.jsonl" \
   --out-dir "${OUT}/figures"
 ${PY} scripts/make_plan_figure.py --metrics "${OUT}/congestion.json" \
