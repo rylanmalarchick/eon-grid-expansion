@@ -109,6 +109,9 @@ echo "== 8/11 logical-vs-physical transpile table (S4)"
 ${PY} scripts/transpile_table.py --depth 2 --levels 0,1 \
   --out "${OUT}/s4_transpile.json"
 
+${PY} scripts/gate_count_floor.py --table "${OUT}/s4_transpile.json" \
+  --out "${OUT}/gate_floor.json"
+
 echo "== 9/11 Qiskit cross-check (D5)"
 ${PY} scripts/qiskit_validation.py --shots 4096 --depth 2 \
   --out "${OUT}/qiskit_validation.json"

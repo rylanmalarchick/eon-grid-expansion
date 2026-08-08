@@ -24,6 +24,7 @@ regenerates the whole set in order.
 | MPS within 1.2 % of optimum by $p=2$ at $n=20$ | `scripts/scale_mps_sweep.py` | `experiments/results/mps_higherp/` | — |
 | Random-feasible control: optimum in 24/25 repeats; cop does not beat the median | `scripts/random_feasible_control.py` | `experiments/results/s3_control/control.jsonl` | — |
 | Transpiled depth 1,118 vs 3,812,541 (≈3,400×) | `scripts/transpile_table.py` | `experiments/results/s4_transpile/table.json` | — |
+| Distance above a proven CNOT floor: 4.1× vs 5,918× | `scripts/gate_count_floor.py` | `experiments/results/s4_transpile/gate_floor.json` | — |
 | Aer vs exact engine agree to 0.06 σ | `scripts/qiskit_validation.py` | `experiments/results/qiskit_validation/` | — |
 | D14 certificate sandwiches the planted optimum | `scripts/qaoa_decomposition_run.py` | `experiments/results/qaoa_decomp_v2/` | — |
 | QAOA landscapes, cop vs vanilla vs warm-start | `scripts/qaoa_landscape.py` | `experiments/results/qaoa_p3/` | `p1_landscapes.pdf`, `excess_vs_depth.pdf`, `feasible_fraction_vs_depth.pdf` |
