@@ -18,6 +18,8 @@ regenerates the whole set in order.
 | Reconfiguration-off control: optimal in 2.6–6.1 s | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/s1_proper_off/` | `hardness_family.pdf` |
 | 5 of 12 surrogates near-decoupled ($\|J\|/\|h\| \approx 1$) | (same records as above) | `experiments/results/s1_proper/` | `hardness_family.pdf` |
 | Scale tier: dense glasses open at 1 h, exact TN cannot contract | `scripts/pathb_spine.py` | `experiments/results/pathb_dense_1h/` | — |
+| MV Oberrhein closes in 4-22 s: the real feeder is NOT hard | `scripts/reconfiguration_sweep.py --feeders mv_oberrhein_f1` | `experiments/results/s2_oberrhein/` | — |
+| S3 coverage sweep: no consistent cop advantage over 5 subspace sizes | `scripts/random_feasible_control.py --hamming-weights` | `experiments/results/s3_coverage_sweep/` | — |
 | MPS 62–82 % above the classical incumbent at $n=120$, two seeds, $\chi=64$ | `scripts/scale_mps_sweep.py` | `experiments/results/scale_mps_rerun/n120_160.jsonl` | — |
 | MPS within 1.2 % of optimum by $p=2$ at $n=20$ | `scripts/scale_mps_sweep.py` | `experiments/results/mps_higherp/` | — |
 | Random-feasible control: optimum in 24/25 repeats; cop does not beat the median | `scripts/random_feasible_control.py` | `experiments/results/s3_control/control.jsonl` | — |
