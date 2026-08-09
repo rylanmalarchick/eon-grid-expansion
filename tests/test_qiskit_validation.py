@@ -9,6 +9,7 @@ circuit and pins that the check FAILS, then pins that it passes when intact.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -97,3 +98,46 @@ def test_the_exported_circuit_is_the_simulated_one_up_to_global_phase(surrogate)
     )
     overlap = abs(np.vdot(from_qiskit, from_engine))
     assert overlap == pytest.approx(1.0, abs=1e-9), f"|<qiskit|engine>| = {overlap}"
+
+
+def test_the_script_itself_rejects_a_broken_circuit(tmp_path, monkeypatch) -> None:
+    """Drive the SCRIPT's decision, not a re-implementation of it.
+
+    The tests above recompute the sigma statistic inline and assert on their own
+    copy. That leaves ``qiskit_validation.py``'s threshold and its non-zero exit
+    -- the behaviour the README and the proposal both cite -- with no coverage
+    at all: replacing ``agrees = sigmas < 5.0`` with ``agrees = True`` keeps the
+    suite green. This test loads the script and asserts it exits non-zero when
+    the circuit it validates is not the one it scores against.
+    """
+    import runpy
+    import sys
+
+    import eon.quantum.export as export_module
+
+    module = runpy.run_path(
+        str(Path(__file__).resolve().parents[1] / "scripts" / "qiskit_validation.py"),
+        run_name="_qiskit_validation_under_test",
+    )
+    genuine = export_module.build_gate_level_qaoa_circuit
+
+    def broken(surrogate, *, betas, gammas, **kwargs):
+        # A circuit-construction bug: the exported circuit uses angles the
+        # exact engine was never scored on.
+        return genuine(surrogate, betas=betas, gammas=(gammas[0] + 0.25, *gammas[1:]), **kwargs)
+
+    # run_path returns a COPY of the script globals, so patch the dict the
+    # function actually closes over, not the returned mapping.
+    monkeypatch.setitem(module["main"].__globals__, "build_gate_level_qaoa_circuit", broken)
+    monkeypatch.setattr(
+        sys, "argv",
+        # The script's own operating point. At a smaller instance or shot
+        # count the 5-sigma bound is too loose to see this perturbation.
+        ["qiskit_validation.py", "--shots", "20000", "--qubits", "20",
+         "--out", str(tmp_path / "record.json")],
+    )
+    with pytest.raises(SystemExit) as raised:
+        module["main"]()
+    assert "disagree" in str(raised.value), (
+        f"the script accepted a circuit built from the wrong angles: {raised.value!r}"
+    )

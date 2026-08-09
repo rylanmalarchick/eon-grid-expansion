@@ -1,9 +1,21 @@
+import shutil
+
 import pytest
 
 from eon.mps.juliqaoa_smoke import _synthetic_surrogate
 from eon.mps.protocol import run_mps_protocol
 
+# The MPS backend shells out to Julia. Without it run_mps_protocol degrades to
+# an exact brute force at small n, so this test would assert the fallback's
+# backend name and fail for a reason that has nothing to do with the code under
+# test. Name the dependency instead of letting it look like a regression.
+needs_julia = pytest.mark.skipif(
+    shutil.which("julia") is None,
+    reason="needs the julia toolchain (JuliQAOA/GenericTensorNetworks)",
+)
 
+
+@needs_julia
 @pytest.mark.requires_gurobi
 def test_mps_protocol_smoke_runs() -> None:
     surrogate = _synthetic_surrogate("easy_path_n8")

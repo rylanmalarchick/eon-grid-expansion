@@ -98,3 +98,22 @@ theorem min_attainer_satisfies_all_clauses {α : Type} (terms : List (α → Int
   exact eq_zero_of_sum_eq_zero _ hnn hzero (t x) hmem
 
 end PosiformPlanting
+
+/-
+Axiom audit. Without this the documented check (`lean lean/PosiformPlanting.lean`)
+prints NOTHING and exits 0, which is indistinguishable from a file that proves
+nothing at all. Each theorem below should report only the standard axioms
+(propext, Classical.choice, Quot.sound) with no `sorry` and no bespoke axiom.
+
+SCOPE, stated here so it cannot be read off the filename: these theorems are
+about a posiform whose terms are pointwise NONNEGATIVE, which is
+`generate_posiform_planted`. They do NOT cover `generate_fused_planted`, whose
+blocks draw coefficients from (-10, 10) and is the generator the experiments
+actually use. They also cover the un-expanded posiform, not the four-branch
+sign expansion.
+-/
+#print axioms PosiformPlanting.sum_nonneg
+#print axioms PosiformPlanting.eq_zero_of_sum_eq_zero
+#print axioms PosiformPlanting.term_nonneg
+#print axioms PosiformPlanting.zero_achiever_is_global_min
+#print axioms PosiformPlanting.min_attainer_satisfies_all_clauses

@@ -27,9 +27,23 @@ logger = logging.getLogger("check_proposal_numbers")
 
 
 def _load(path: Path) -> list[dict]:
+    """A MISSING artifact is a failure, not an empty check.
+
+    This used to return [] so that every downstream loop silently did nothing:
+    `--results /nonexistent` reported "every checked number matches its
+    artifact" and exited 0. A drift guard that passes when there is nothing to
+    check against is worse than no guard, because it reads as verification.
+    """
     if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        raise FileNotFoundError(
+            f"expected artifact {path} is missing -- cannot verify the numbers "
+            "it pins down. Regenerate it (docs/results_index.md names the "
+            "script) or point --results at the right tree."
+        )
+    records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    if not records:
+        raise ValueError(f"artifact {path} is empty -- nothing to check against")
+    return records
 
 
 def main() -> None:
@@ -54,7 +68,13 @@ def main() -> None:
 
     # --- congestion headline -------------------------------------------
     congestion = root / "congestion_seed7"
-    for candidate in congestion.glob("*.json"):
+    congestion_files = sorted(congestion.glob("*.json"))
+    if not congestion_files:
+        raise FileNotFoundError(
+            f"no congestion artifact under {congestion} -- the headline "
+            "reduction cannot be verified"
+        )
+    for candidate in congestion_files:
         record = json.loads(candidate.read_text())
         evaluations = record.get("evaluations", {})
         for label in ("status_quo", "plan"):
@@ -77,7 +97,12 @@ def main() -> None:
         logger.error(failure)
     if failures:
         sys.exit(1)
-    logger.info("every checked number matches its artifact")
+    logger.info(
+        "%d checked number(s) match their artifact. This guard is NARROW: it is "
+        "a substring test over the numbers listed above, and covers none of the "
+        "S4 transpile/gate-floor figures.",
+        checked,
+    )
 
 
 if __name__ == "__main__":
