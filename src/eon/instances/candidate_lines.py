@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -34,6 +35,27 @@ def seed_diversifies(family: str, *, rank_jitter: float) -> bool:
     (root-caused 2026-08-01, after a 12-config sweep returned 3 distinct
     instances). Call this before claiming seed-replication."""
     return family.lower().strip() == "random_uniform" or rank_jitter > 0.0
+
+
+def require_seed_diversification(seeds: Sequence[int], family: str, *, rank_jitter: float) -> None:
+    """Refuse to run a multi-seed sweep whose seeds cannot diversify.
+
+    `seed_diversifies` has existed since 2026-08-01 but nothing ever called it,
+    so the quantum scripts kept rebuilding ONE instance per family and labelling
+    the results as several seeds -- the same defect the hardness sweep retracted,
+    still live in the S3 and P3 records. This raises instead of warning: the
+    output of such a run is indistinguishable from a genuine replication once it
+    is on disk, and by then the label is already wrong.
+    """
+    distinct = sorted(set(int(s) for s in seeds))
+    if len(distinct) > 1 and not seed_diversifies(family, rank_jitter=rank_jitter):
+        raise ValueError(
+            f"{len(distinct)} seeds {distinct} requested for family {family!r} at "
+            f"rank_jitter={rank_jitter}, where seed is a NO-OP: every seed would "
+            "rebuild the SAME instance and the records would read as replication. "
+            "Pass --rank-jitter > 0 (0.5 is what the hardness sweep uses), or run "
+            "a single seed."
+        )
 
 
 def generate_candidate_lines(
@@ -75,8 +97,13 @@ def generate_candidate_lines(
         return []
 
     ranked_pairs = _rank_pairs(
-        graph, coords, eligible_pairs, candidate_family, seed,
-        stress_info=stress_info, rank_jitter=rank_jitter,
+        graph,
+        coords,
+        eligible_pairs,
+        candidate_family,
+        seed,
+        stress_info=stress_info,
+        rank_jitter=rank_jitter,
     )
     selected_pairs = ranked_pairs[:count]
     candidates: list[CandidateLine] = []
@@ -134,6 +161,7 @@ def _rank_pairs(
         # default 0.0 every family below except random_uniform is a pure
         # deterministic sort and `seed` has NO effect (seed_diversifies()).
         return rng.uniform(-rank_jitter, rank_jitter) if rank_jitter > 0.0 else 0.0
+
     if family == "random_uniform":
         shuffled = list(pairs)
         rng.shuffle(shuffled)

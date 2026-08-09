@@ -34,6 +34,7 @@ import numpy as np
 
 from eon.formulations.layer_b import LayerBSurrogate
 from eon.formulations.lindistflow import ExpansionProblemConfig
+from eon.instances.candidate_lines import require_seed_diversification
 from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.external import build_external_surrogate, generate_fused_planted
 from eon.instances.hardness_classifier import (
@@ -150,9 +151,7 @@ def _result_record(
         # Best FEASIBLE sampled energy relative to the exact optimum of the
         # same scored cost object (0 = optimal). Both sides are the penalized
         # vector, so this cannot go negative.
-        "best_sample_excess": (best_penalized - exact_optimum) / scale
-        if best.feasible
-        else None,
+        "best_sample_excess": (best_penalized - exact_optimum) / scale if best.feasible else None,
         "feasible_fraction": feasible_fraction,
         "run": run_meta,
     }
@@ -164,6 +163,14 @@ def main() -> None:
     parser.add_argument("--depth", type=int, default=3)
     parser.add_argument("--shots", type=int, default=1024)
     parser.add_argument("--nm-evals", type=int, default=60)
+    parser.add_argument(
+        "--rank-jitter",
+        type=float,
+        default=0.0,
+        help="Perturb the candidate ranking's tie-breaks so seeds genuinely "
+        "diversify (0.0 = deterministic families, seeds are a NO-OP and every "
+        "seed rebuilds the SAME Layer B instance).",
+    )
     parser.add_argument("--seeds", default="7,24")
     parser.add_argument("--out", default="")
     parser.add_argument(
@@ -187,6 +194,12 @@ def main() -> None:
         help="Skip the fused planted anchors (resume helper).",
     )
     args = parser.parse_args()
+    # Fail at launch, not after hours of compute that cannot be labelled.
+    require_seed_diversification(
+        [int(s) for s in args.seeds.split(",") if s.strip()],
+        "community_bridging",
+        rank_jitter=args.rank_jitter,
+    )
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_path = (
@@ -205,6 +218,7 @@ def main() -> None:
         "git_commit": _git_commit(),
         "timestamp_utc": stamp,
         "penalty_mode": args.penalty_mode,
+        "rank_jitter": args.rank_jitter,
     }
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
 
@@ -226,8 +240,9 @@ def main() -> None:
             n_scenarios_aggregated=3,
             enable_reconfiguration=True,
         )
-        logger.info("building ieee33 community_bridging seed=%d (Layer A %.0fs)",
-                    seed, args.time_limit)
+        logger.info(
+            "building ieee33 community_bridging seed=%d (Layer A %.0fs)", seed, args.time_limit
+        )
         _, layer_a, surrogate = build_instance_surrogate(
             net,
             scenarios,
@@ -239,6 +254,7 @@ def main() -> None:
             time_limit=args.time_limit,
             cost_per_km=COST_PER_KM,
             baseline_stress=baseline_stress,
+            rank_jitter=args.rank_jitter,
         )
         logger.info("  layer A %s gap=%s", layer_a.termination_status, layer_a.mip_gap)
         jobs.append((f"ieee33:community_bridging:seed{seed}:n20", surrogate, True, seed))

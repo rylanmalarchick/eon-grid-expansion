@@ -30,6 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from eon.formulations.lindistflow import ExpansionProblemConfig
+from eon.instances.candidate_lines import require_seed_diversification
 from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.hardness_classifier import (
     _compute_baseline_stress,
@@ -77,6 +78,14 @@ def main() -> None:
     parser.add_argument("--time-limit", type=float, default=1800.0)
     parser.add_argument("--shots", type=int, default=1024)
     parser.add_argument("--repeats", type=int, default=25)
+    parser.add_argument(
+        "--rank-jitter",
+        type=float,
+        default=0.0,
+        help="Perturb the candidate ranking's tie-breaks so seeds genuinely "
+        "diversify (0.0 = deterministic families, seeds are a NO-OP and every "
+        "seed rebuilds the SAME Layer B instance).",
+    )
     parser.add_argument("--seeds", default="7")
     parser.add_argument("--neighborhood", type=int, default=20)
     parser.add_argument("--depth", type=int, default=2)
@@ -109,6 +118,12 @@ def main() -> None:
     )
     parser.add_argument("--out", default="")
     args = parser.parse_args()
+    # Fail at launch, not after hours of compute that cannot be labelled.
+    require_seed_diversification(
+        [int(s) for s in args.seeds.split(",") if s.strip()],
+        "community_bridging",
+        rank_jitter=args.rank_jitter,
+    )
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_path = (
@@ -145,6 +160,7 @@ def main() -> None:
                 time_limit=args.time_limit,
                 cost_per_km=10_000.0,
                 baseline_stress=baseline_stress,
+                rank_jitter=args.rank_jitter,
             )
             energies = build_energy_vector(surrogate)
             n = len(surrogate.variables)
@@ -155,9 +171,7 @@ def main() -> None:
             # The Layer A solve above is weight-independent, so every weight
             # in the sweep reuses it.
             for weight_override in sweep:
-                weight = _target_hamming_weight(
-                    surrogate, override=weight_override
-                )
+                weight = _target_hamming_weight(surrogate, override=weight_override)
                 subspace = _fixed_weight_states(n, weight)
                 subspace_energies = energies[subspace]
                 subspace_size = len(subspace)
@@ -169,7 +183,13 @@ def main() -> None:
                 coverage = 1.0 - (1.0 - 1.0 / subspace_size) ** args.shots
                 logger.info(
                     "n=%d weight=%d |subspace|=C(%d,%d)=%d shots=%d expected coverage=%.1f%%",
-                    n, weight, n, weight, subspace_size, args.shots, 100 * coverage,
+                    n,
+                    weight,
+                    n,
+                    weight,
+                    subspace_size,
+                    args.shots,
+                    100 * coverage,
                 )
 
                 rng = np.random.default_rng(seed)
@@ -190,6 +210,7 @@ def main() -> None:
                     # the record reported w=6 statistics beside it.
                     hamming_weight=weight_override,
                 )
+
                 # Score cop on the SAME vector random_best is drawn from.
                 # best_sample.objective is the UNPENALIZED surrogate objective,
                 # and at weights above the build budget every cop sample is
@@ -215,9 +236,7 @@ def main() -> None:
                     "subspace": {
                         "variable_count": n,
                         "hamming_weight": weight,
-                        "weight_source": (
-                            "imposed" if weight_override is not None else "derived"
-                        ),
+                        "weight_source": ("imposed" if weight_override is not None else "derived"),
                         "size": subspace_size,
                         "shots": args.shots,
                         "expected_coverage_fraction": coverage,
@@ -242,12 +261,11 @@ def main() -> None:
                     },
                     "excess_over_exact": {
                         "random_median": (float(np.median(random_best)) - exact_optimum) / scale,
-                        **{
-                            f"cop_p{p}": (v - exact_optimum) / scale for p, v in cop_best.items()
-                        },
+                        **{f"cop_p{p}": (v - exact_optimum) / scale for p, v in cop_best.items()},
                     },
                     "run": {
                         "time_limit_s": args.time_limit,
+                        "rank_jitter": args.rank_jitter,
                         "max_new_lines": args.max_new_lines,
                         "hamming_weight_override": weight_override,
                         "git_commit": _git_commit(),

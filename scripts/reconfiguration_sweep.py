@@ -38,6 +38,7 @@ from eon.formulations.lindistflow import (
     ExpansionResult,
     suggested_flow_big_m_mva,
 )
+from eon.instances.candidate_lines import require_seed_diversification
 from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.hardness_classifier import (
     _compute_baseline_stress,
@@ -340,6 +341,10 @@ def main() -> None:
     feeders = [f.strip() for f in args.feeders.split(",") if f.strip()]
     families = [f.strip() for f in args.families.split(",") if f.strip()]
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
+    # Fail at launch, not after hours of compute whose records cannot honestly
+    # be labelled. Every family in the sweep has to be able to diversify.
+    for family in families:
+        require_seed_diversification(seeds, family, rank_jitter=args.rank_jitter)
     qaoa_rounds_list = [int(p) for p in str(args.qaoa_rounds).split(",") if p.strip()]
     if not qaoa_rounds_list or any(p < 1 for p in qaoa_rounds_list):
         raise SystemExit(f"--qaoa-rounds must be positive ints, got {args.qaoa_rounds!r}")
