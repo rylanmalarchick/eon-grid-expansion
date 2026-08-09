@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import warnings
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ IEEE123_MATPOWER_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "ieee123" / "grid_IEEE123_complete.m"
 )
 SUPPORTED_FEEDERS = frozenset({"ieee33", "ieee123", "mv_oberrhein_f1", "mv_oberrhein_f2"})
+
+
+logger = logging.getLogger(__name__)
 
 
 def load_distribution_feeder(name: str) -> pp.pandapowerNet:
@@ -137,9 +141,41 @@ def _normalize_network(net: pp.pandapowerNet, feeder_name: str) -> None:
             np.nan,
         )
         current_limit_default = current_limits.dropna().median()
+        default_source = "median of the feeder's own usable ratings"
         if np.isnan(current_limit_default):
             current_limit_default = 0.4
+            default_source = "hard-coded fallback (no usable rating in the fixture)"
+        defaulted = int(current_limits.isna().sum())
         net.line["max_i_ka"] = current_limits.fillna(float(current_limit_default))
+        # Congestion is defined RELATIVE to these ratings, so a silently
+        # invented one turns into a headline number. case33bw ships
+        # max_i_ka = 99999 on every branch -- a "no limit" placeholder -- which
+        # masks to NaN, medians to NaN, and lands on the fallback for the whole
+        # feeder, giving the head section and the laterals the same rating.
+        # That is a modelling ASSUMPTION, not feeder data, and it has to be
+        # visible wherever it is load-bearing.
+        rating_provenance = {
+            "defaulted_branches": defaulted,
+            "total_branches": int(len(current_limits)),
+            "default_ka": float(current_limit_default),
+            "default_source": default_source,
+        }
+        if defaulted:
+            fraction = defaulted / max(len(current_limits), 1)
+            logger.warning(
+                "%s: %d of %d branch ratings (%.0f%%) are NOT feeder data -- "
+                "defaulted to %.3f kA (%s). Every congestion number on this "
+                "feeder is measured against that assumption.",
+                feeder_name, defaulted, len(current_limits), 100 * fraction,
+                current_limit_default, default_source,
+            )
+    else:
+        rating_provenance = {
+            "defaulted_branches": 0,
+            "total_branches": 0,
+            "default_ka": None,
+            "default_source": "no lines",
+        }
     if len(net.trafo):
         net.trafo["hv_bus"] = net.trafo["hv_bus"].astype(int)
         net.trafo["lv_bus"] = net.trafo["lv_bus"].astype(int)
@@ -148,6 +184,7 @@ def _normalize_network(net: pp.pandapowerNet, feeder_name: str) -> None:
         "feeder_name": feeder_name,
         "slack_bus": slack_bus_index(net),
         "bus_coordinates": bus_coordinates(net),
+        "rating_provenance": rating_provenance,
     }
 
 
