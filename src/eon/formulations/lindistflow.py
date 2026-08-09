@@ -98,6 +98,9 @@ class _LineSpec:
     capacity_mva: float
     build_cost: float
     is_candidate: bool
+    # A normally-open tie: the asset exists but is not energized. It is a
+    # switching option under reconfiguration and carries nothing without it.
+    normally_open: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,19 +190,24 @@ def solve_lindistflow_expansion(
     # point. Widen the voltage-variable band accordingly. Non-reconfiguration
     # behaviour is unchanged (vband == voltage_big_m_pu).
     vband = (
-        cfg.reconfiguration_voltage_slack_pu
-        if cfg.enable_reconfiguration
-        else cfg.voltage_big_m_pu
+        cfg.reconfiguration_voltage_slack_pu if cfg.enable_reconfiguration else cfg.voltage_big_m_pu
     )
     # Big-M that fully relaxes a branch's LinDistFlow voltage coupling when the
     # branch is de-energized: must exceed the largest representable |v_to -
     # v_from| (the full voltage band), or an OPEN branch wrongly forces its
     # endpoints' voltages together. The original voltage_big_m_pu was too small.
-    vdrop_relax_pu = (
-        (cfg.voltage_max_pu + vband) - (cfg.voltage_min_pu - vband)
-        if cfg.enable_reconfiguration
-        else cfg.voltage_big_m_pu
-    )
+    # Both modes need this, not just the reconfiguration one: with switching
+    # disabled the 24 unbuilt candidates are de-energized too, and a relax of
+    # voltage_big_m_pu (0.35) below the representable span (0.80) clamped their
+    # endpoints to within 0.35 pu of each other -- a line nobody built still
+    # shaping the baseline voltage profile.
+    vdrop_relax_pu = (cfg.voltage_max_pu + vband) - (cfg.voltage_min_pu - vband)
+    # Impedances are per-unit on net.sn_mva; flows are in MVA (thermal ratings,
+    # capacities and the big-M all live in MVA). The LinDistFlow drop needs both
+    # sides in per-unit, so the flow converts here. Without this the drop is
+    # sn_mva times too large -- 10x on IEEE 33, which is what pinned every
+    # scenario's voltage at its variable bound.
+    mva_base = max(float(net.sn_mva), 1e-6)
 
     for scenario in scenarios:
         import_p[scenario.name] = model.addVar(lb=0.0, name=f"grid_import[{scenario.name}]")
@@ -251,27 +259,32 @@ def solve_lindistflow_expansion(
             overload[key] = model.addVar(lb=0.0, name=f"overload[{scenario.name},{line.name}]")
             z: Any
             if cfg.enable_reconfiguration:
-                # Open branches carry no power: gate flow hard to zero when the
-                # switch is open, so radiality actually constrains the power flow.
                 z = closed_vars[line.name]
-                model.addConstr(
-                    p_flow[key] <= cfg.flow_big_m_mva * z,
-                    name=f"p_gate_hi[{scenario.name},{line.name}]",
-                )
-                model.addConstr(
-                    p_flow[key] >= -cfg.flow_big_m_mva * z,
-                    name=f"p_gate_lo[{scenario.name},{line.name}]",
-                )
-                model.addConstr(
-                    q_flow[key] <= cfg.flow_big_m_mva * z,
-                    name=f"q_gate_hi[{scenario.name},{line.name}]",
-                )
-                model.addConstr(
-                    q_flow[key] >= -cfg.flow_big_m_mva * z,
-                    name=f"q_gate_lo[{scenario.name},{line.name}]",
-                )
+            elif line.is_candidate:
+                z = build_vars[line.name]
+            elif line.normally_open:
+                # No switching lever in this mode, so a normally-open tie stays open.
+                z = 0.0
             else:
-                z = 1.0 if not line.is_candidate else build_vars[line.name]
+                z = 1.0
+            # Open branches carry no power. This gate has to apply in BOTH modes:
+            # without it an unbuilt candidate still enters the nodal balance and
+            # still imposes its KVL row, and because its thermal row reads
+            # p_abs + q_abs <= cap*0 + overload, every MVA it carries is booked
+            # as congestion on a line that was never built.
+            if not isinstance(z, float):
+                for flow, tag in ((p_flow[key], "p"), (q_flow[key], "q")):
+                    model.addConstr(
+                        flow <= cfg.flow_big_m_mva * z,
+                        name=f"{tag}_gate_hi[{scenario.name},{line.name}]",
+                    )
+                    model.addConstr(
+                        flow >= -cfg.flow_big_m_mva * z,
+                        name=f"{tag}_gate_lo[{scenario.name},{line.name}]",
+                    )
+            elif z == 0.0:
+                model.addConstr(p_flow[key] == 0.0, name=f"p_open[{scenario.name},{line.name}]")
+                model.addConstr(q_flow[key] == 0.0, name=f"q_open[{scenario.name},{line.name}]")
             cap = min(cap, cfg.flow_big_m_mva)
             model.addConstr(
                 p_abs[key] >= p_flow[key],
@@ -304,7 +317,7 @@ def solve_lindistflow_expansion(
             voltage_drop = (
                 v_bus[(scenario.name, line.to_bus)] - v_bus[(scenario.name, line.from_bus)]
             )
-            flow_drop = 2.0 * (line.r_pu * p_flow[key] + line.x_pu * q_flow[key])
+            flow_drop = 2.0 * (line.r_pu * p_flow[key] + line.x_pu * q_flow[key]) / mva_base
             model.addConstr(
                 voltage_drop + flow_drop <= vdrop_relax_pu * (1.0 - z),
                 name=f"vdrop_upper[{scenario.name},{line.name}]",
@@ -319,12 +332,18 @@ def solve_lindistflow_expansion(
             q_balance: list[Any] = []
             for line in incident[bus]:
                 key = (scenario.name, line.name)
+                # p_flow is positive when power moves from_bus -> to_bus, which
+                # is the convention the LinDistFlow drop equation above assumes.
+                # A branch therefore REMOVES power at its from_bus and DELIVERS
+                # it at its to_bus. Getting this backwards makes p_flow negative
+                # toward the load, which flips the drop term and produces voltage
+                # RISE along a loaded radial feeder -- see tests/test_voltage_sign.py.
                 if line.from_bus == bus:
-                    p_balance.append(p_flow[key])
-                    q_balance.append(q_flow[key])
-                else:
                     p_balance.append(-p_flow[key])
                     q_balance.append(-q_flow[key])
+                else:
+                    p_balance.append(p_flow[key])
+                    q_balance.append(q_flow[key])
             supply: Any = gen_p[bus] * scenario.generation_scale - curtail[(scenario.name, bus)]
             demand_p = load_p[bus] * scenario.load_scale
             demand_q: Any = load_q[bus] * scenario.load_scale
@@ -357,7 +376,9 @@ def solve_lindistflow_expansion(
         for line in all_lines:
             key = (scenario.name, line.name)
             objective_terms.append(probability * cfg.weights.thermal_violation * overload[key])
-            objective_terms.append(probability * cfg.weights.loss_proxy * line.r_pu * p_abs[key])
+            objective_terms.append(
+                probability * cfg.weights.loss_proxy * line.r_pu * p_abs[key] / mva_base
+            )
     model.setObjective(gp.quicksum(objective_terms), GRB.MINIMIZE)
 
     optimization = _optimize_expansion_model(
@@ -421,7 +442,9 @@ def solve_lindistflow_expansion(
                 )
                 loading_map[line.name] = loading
                 thermal += optimization.variable_values[overload[key].VarName]
-                loss_proxy += line.r_pu * optimization.variable_values[p_abs[key].VarName]
+                loss_proxy += (
+                    line.r_pu * optimization.variable_values[p_abs[key].VarName] / mva_base
+                )
             scenario_metrics.append(
                 ScenarioMetrics(
                     scenario=scenario.name,
@@ -529,6 +552,7 @@ def _existing_line_specs(
                 capacity_mva=max(capacity, 1e-3),
                 build_cost=0.0,
                 is_candidate=False,
+                normally_open=not bool(row.in_service),
             )
         )
     for trafo_index, row in net.trafo.iterrows():
@@ -670,9 +694,7 @@ def _optimize_expansion_model(
         runtime_s=runtime_s,
         objective_value=float(model.ObjVal) if model.SolCount else float("inf"),
         best_bound=(
-            float(model.ObjBound)
-            if model.SolCount or model.Status == GRB.TIME_LIMIT
-            else None
+            float(model.ObjBound) if model.SolCount or model.Status == GRB.TIME_LIMIT else None
         ),
         mip_gap=float(model.MIPGap) if model.SolCount and model.IsMIP else None,
         variable_values=variable_values,
@@ -730,9 +752,7 @@ def _optimize_with_highs(
                 float(info.mip_dual_bound) if isfinite(float(info.mip_dual_bound)) else None
             ),
             mip_gap=(
-                float(info.mip_gap)
-                if variable_values and isfinite(float(info.mip_gap))
-                else None
+                float(info.mip_gap) if variable_values and isfinite(float(info.mip_gap)) else None
             ),
             variable_values=variable_values,
         )
