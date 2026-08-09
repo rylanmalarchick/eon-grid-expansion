@@ -61,62 +61,63 @@ fi
 echo "== interpreter: $(command -v "${PY}")"
 echo "== reproduce_headline mode=${MODE} -> ${OUT}"
 
-echo "== 1/11 feeder hardness (reconfiguration ON vs OFF, IEEE 33)"
+echo "== 1/14 feeder hardness (reconfiguration ON vs OFF, IEEE 33)"
 ${PY} scripts/reconfiguration_sweep.py --feeders ieee33 \
-  --families community_bridging --seeds 7,24 --time-limit "${LAYER_A_LIMIT}" \
-  ${WITH_MPS_FLAG} --qaoa-rounds 1,2,3 --out "${OUT}/feeder_on.jsonl"
+  --families community_bridging --seeds 7,24 --rank-jitter 0.5 \
+  --time-limit "${LAYER_A_LIMIT}" ${WITH_MPS_FLAG} --qaoa-rounds 1,2,3 --out "${OUT}/feeder_on.jsonl"
 ${PY} scripts/reconfiguration_sweep.py --feeders ieee33 \
-  --families community_bridging --seeds 7,24 --time-limit "${LAYER_A_LIMIT}" \
-  --no-reconfiguration --out "${OUT}/feeder_off.jsonl"
+  --families community_bridging --seeds 7,24 --rank-jitter 0.5 \
+  --time-limit "${LAYER_A_LIMIT}" --no-reconfiguration --out "${OUT}/feeder_off.jsonl"
 
-echo "== 2/11 Path B scale tier (dense glasses)"
+echo "== 2/14 Path B scale tier (dense glasses)"
 ${PY} scripts/pathb_spine.py --time-limit "${GLASS_LIMIT}" --seeds 7,24 \
   --fused-sizes "" --glass-sizes "${GLASS_SIZES}" --glass-mean-degree 0 \
   --glass-coefficient-range=-10,10 --out "${OUT}/pathb_dense.jsonl"
 
-echo "== 3/11 QAOA landscape (cop vs vanilla vs warm)"
+echo "== 3/14 QAOA landscape (cop vs vanilla vs warm)"
 ${PY} scripts/qaoa_landscape.py --time-limit "${LAYER_A_LIMIT}" \
   --depth "${DEPTH}" --shots 1024 --nm-evals "${NM_EVALS}" \
+  --penalty-mode quadratic --rank-jitter 0.5 \
   --out "${OUT}/landscape.jsonl"
 
-echo "== 4/11 decomposition + D14 certificate"
+echo "== 4/14 decomposition + D14 certificate"
 ${PY} scripts/qaoa_decomposition_run.py --time-limit "${LAYER_A_LIMIT}" \
   --block-size 10 --p 1 --out "${OUT}/decomposition.jsonl"
 
-echo "== 5/11 scale-tier MPS sweep"
+echo "== 5/14 scale-tier MPS sweep"
 ${PY} scripts/scale_mps_sweep.py --sizes "${MPS_SIZES}" --seeds 7,24 \
   --chi-values "${MPS_CHI}" --gurobi-time-limit 600 \
   --out "${OUT}/scale_mps.jsonl"
 
-echo "== 6/11 congestion metrics"
+echo "== 6/14 congestion metrics"
 ${PY} scripts/congestion_metrics.py --time-limit "${LAYER_A_LIMIT}" \
   --eval-time-limit 600 --seed 7 --out "${OUT}/congestion.json"
 
-echo "== 7/11 random-feasible control (S3), both subspace regimes"
+echo "== 7/14 random-feasible control (S3), both subspace regimes"
 # The finding needs BOTH runs. At the derived weight the subspace is 190 states
 # against 1024 shots, so sampling is near-exhaustive and cop-QAOA ties a random
 # draw. At weight 6 the subspace is 38,760 states, and the comparison is about
 # search quality rather than coverage. Reporting only one regime misstates the
 # result in whichever direction that regime happens to favor.
 ${PY} scripts/random_feasible_control.py --time-limit "${LAYER_A_LIMIT}" \
-  --shots 1024 --repeats 25 --seeds 7 --depth 2 \
+  --shots 1024 --repeats 25 --seeds 7 --depth 2 --rank-jitter 0.5 \
   --out "${OUT}/s3_control.jsonl"
 ${PY} scripts/random_feasible_control.py --time-limit "${LAYER_A_LIMIT}" \
-  --shots 1024 --repeats 25 --seeds 7 --depth 2 --hamming-weight 6 \
+  --shots 1024 --repeats 25 --seeds 7 --depth 2 --hamming-weight 6 --rank-jitter 0.5 \
   --out "${OUT}/s3_control_w6.jsonl"
 
-echo "== 8/11 logical-vs-physical transpile table (S4)"
+echo "== 8/14 logical-vs-physical transpile table (S4)"
 ${PY} scripts/transpile_table.py --depth 2 --levels 0,1 \
   --out "${OUT}/s4_transpile.json"
 
 ${PY} scripts/gate_count_floor.py --table "${OUT}/s4_transpile.json" \
   --out "${OUT}/gate_floor.json"
 
-echo "== 9/11 Qiskit cross-check (D5)"
+echo "== 9/14 Qiskit cross-check (D5)"
 ${PY} scripts/qiskit_validation.py --shots 4096 --depth 2 \
   --out "${OUT}/qiskit_validation.json"
 
-echo "== 10/11 hardness figure (S1 family)"
+echo "== 10/14 hardness figure (S1 family)"
 # The instance family is a SEPARATE sweep -- 12 Layer A solves at 1800 s each,
 # far too slow to sit inside this pipeline -- so its records live in their
 # canonical location, not this run's output directory. Skip cleanly when they
@@ -137,7 +138,7 @@ else
   echo "   generate them with scripts/reconfiguration_sweep.py (see docs/results_index.md)"
 fi
 
-echo "== 11/11 figures"
+echo "== 11/14 figures"
 ${PY} scripts/make_coverage_figure.py \
   --records "${OUT}"/s3_control.jsonl "${OUT}"/s3_control_w6.jsonl \
   --out-dir "${OUT}/figures"
@@ -148,3 +149,18 @@ ${PY} scripts/make_plan_figure.py --metrics "${OUT}/congestion.json" \
 ${PY} scripts/make_pipeline_figure.py --out-dir "${OUT}/figures"
 
 echo "== done: ${OUT}"
+
+echo "== 12/14 robustness: the uncertainty box"
+${PY} scripts/scenario_box_sweep.py --out "${OUT}/ieee33_box.json"
+
+echo "== 13/14 MV Oberrhein, both as-operated feeders"
+for FEEDER in mv_oberrhein_f1 mv_oberrhein_f2; do
+  ${PY} scripts/reconfiguration_sweep.py --feeders "${FEEDER}" \
+    --families community_bridging --seeds 7,24 --rank-jitter 0.5 \
+    --time-limit "${LAYER_A_LIMIT}" --out "${OUT}/${FEEDER}_on.jsonl"
+done
+
+echo "== 14/14 S3 coverage sweep across subspace sizes"
+${PY} scripts/random_feasible_control.py --time-limit "${LAYER_A_LIMIT}" \
+  --shots 1024 --repeats 25 --seeds 7 --depth 2 --rank-jitter 0.5 \
+  --hamming-weights 2,3,4,6,8 --out "${OUT}/s3_coverage_sweep.jsonl"

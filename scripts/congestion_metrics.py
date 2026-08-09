@@ -59,12 +59,15 @@ def _git_commit() -> str:
         return "unknown"
 
 
-def _config(time_limit: float, reconfiguration: bool) -> ExpansionProblemConfig:
+def _config(
+    time_limit: float, reconfiguration: bool, threads: int = 0
+) -> ExpansionProblemConfig:
     return ExpansionProblemConfig(
         max_new_lines=3,
         time_limit_s=time_limit,
         n_scenarios_aggregated=3,
         enable_reconfiguration=reconfiguration,
+        threads=threads,
     )
 
 
@@ -82,6 +85,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--time-limit", type=float, default=1800.0)
     parser.add_argument("--eval-time-limit", type=float, default=600.0)
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=0,
+        help="Gurobi threads per solve; 0 = all cores. This script runs ~140 "
+        "surrogate evaluations back to back, so the default saturates the "
+        "machine for hours. Set it when sharing the box.",
+    )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--out", default="")
     args = parser.parse_args()
@@ -96,7 +107,7 @@ def main() -> None:
 
     net = load_distribution_feeder("ieee33")
     scenarios = build_scenario_set(SCENARIO_KIND)
-    plan_config = _config(args.time_limit, reconfiguration=True)
+    plan_config = _config(args.time_limit, reconfiguration=True, threads=args.threads)
     baseline_stress = _compute_baseline_stress(net, scenarios, plan_config)
 
     logger.info("headline Layer A solve (ieee33 community_bridging seed=%d, %.0fs)",
@@ -130,7 +141,7 @@ def main() -> None:
             net,
             scenarios,
             candidates,
-            _config(args.eval_time_limit, reconfiguration),
+            _config(args.eval_time_limit, reconfiguration, threads=args.threads),
             fixed_builds=builds,
         )
 

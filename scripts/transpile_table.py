@@ -33,6 +33,7 @@ from qiskit import QuantumCircuit, qasm3, transpile
 from qiskit.transpiler import CouplingMap
 
 from eon.formulations.layer_b import LayerBSurrogate
+from eon.formulations.qubo import compile_external_qubo, compile_layer_b_qubo_hess
 from eon.instances.external import build_external_surrogate, generate_fused_planted
 from eon.quantum.export import build_gate_level_qaoa_circuit
 
@@ -97,6 +98,13 @@ def _row(
     row: dict[str, object] = {
         "algorithm": label,
         "mixer": mixer,
+        "penalty_free": penalty_free,
+        "cost_graph_edges": sum(
+            1 for (a, b) in (
+                compile_external_qubo(surrogate) if penalty_free
+                else compile_layer_b_qubo_hess(surrogate)
+            ).qubo if a != b
+        ),
         "qaoa_depth_p": depth,
         "logical": _metrics(logical),
         "transpiled": {},
@@ -152,10 +160,26 @@ def main() -> None:
     instance = generate_fused_planted(20, seed=7, block_size=10, alpha=0.1)
     surrogate = build_external_surrogate(instance)
 
+    # Each arm is transpiled AS IT WOULD ACTUALLY RUN, which is the only
+    # comparison that says anything about hardware cost.
+    #
+    # Penalty QAOA needs the cardinality penalty in its cost operator -- that is
+    # what makes it "penalty" QAOA. The Hess (sum-K)^2 term is all-pairs, so its
+    # cost graph is COMPLETE (190 edges at n=20), not the 129 of the raw
+    # instance. The constrained mixer enforces cardinality by construction and
+    # so runs penalty-free.
+    #
+    # Both arms were previously transpiled with penalty_free=True, i.e. the
+    # penalty deleted from the penalty ansatz. That made the two cost layers
+    # identical by construction and understated the arm the proposal went on to
+    # recommend.
     rows = []
-    for label, mixer in (("vanilla", "x"), ("cop", "xy_ring")):
+    for label, mixer, penalty_free in (
+        ("vanilla", "x", False),
+        ("cop", "xy_ring", True),
+    ):
         rows.append(
-            _row(surrogate, label, mixer, depth=args.depth, penalty_free=True,
+            _row(surrogate, label, mixer, depth=args.depth, penalty_free=penalty_free,
                  coupling=coupling, levels=levels)
         )
         # Save after each algorithm: transpiling a densely-coupled QAOA circuit
@@ -168,7 +192,7 @@ def main() -> None:
             betas=tuple(0.3 for _ in range(args.depth)),
             gammas=tuple(0.7 for _ in range(args.depth)),
             mixer=str(row["mixer"]),
-            penalty_free=True,
+            penalty_free=bool(row["penalty_free"]),
         )
         path = qasm_dir / f"{row['algorithm']}_p{args.depth}_n20.qasm"
         try:
