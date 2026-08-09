@@ -22,7 +22,14 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e ".[dev]"
+        # gurobipy is installed WITHOUT a licence on purpose. Its built-in
+        # size-limited licence (2000 vars / 2000 constraints) is enough to solve
+        # the physics-validation models -- the IEEE 33 AC cross-check is a
+        # 319-variable LP -- so the checks that compare Layer A against a real
+        # power flow now run on every push. Before this, every solver test
+        # carried requires_gurobi, CI installed no gurobipy, and all 14 skipped:
+        # CI was green for months while the voltage-drop sign was inverted.
+        run: pip install -e ".[dev,gurobi]"
 
       - name: Lint
         run: ruff check .
@@ -36,7 +43,25 @@ jobs:
         # to mean less than it appears to.
         run: pytest -q -rs tests/
 
-      - name: Assert the solver-dependent tests skipped rather than vanished
+      - name: Assert the physics validation actually RAN
+        # The marker check below proves the marker exists. It does not prove the
+        # tests executed -- when gurobipy was absent they all skipped by name and
+        # the run stayed green. These must RUN, because they are the only checks
+        # that compare Layer A against pandapower's AC power flow.
+        run: |
+          set -euo pipefail
+          pytest -q -rs \
+            tests/test_voltage_sign.py \
+            tests/test_open_branches_carry_no_flow.py \
+            --no-header -p no:cacheprovider | tee /tmp/physics.txt
+          if grep -qE "skipped|no tests ran" /tmp/physics.txt; then
+            echo "ERROR: the Layer A physics validation did not execute." >&2
+            echo "       A green run without it is what let an inverted voltage" >&2
+            echo "       sign and a per-unit scaling error ship undetected." >&2
+            exit 1
+          fi
+
+      - name: Assert the solver-dependent tests are still marked
         run: |
           set -euo pipefail
           marked=$(pytest --collect-only -q -m requires_gurobi tests/ 2>/dev/null | grep -c "::" || true)
