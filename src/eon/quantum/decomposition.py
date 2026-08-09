@@ -108,6 +108,39 @@ def _block_minimum_toggle_space(block: LayerBSurrogate) -> float:
     return best
 
 
+def _require_partition(surrogate: LayerBSurrogate, blocks: list[LayerBSurrogate]) -> None:
+    """The bound is only a bound if the blocks PARTITION the variables.
+
+    The Lean theorem assumes blocks plus dropped couplings reconstitute the
+    objective; that hypothesis lives on the assumed side there and was stated
+    nowhere here. A caller who omits a block gets a "lower bound" computed
+    without that block's linear terms, which can land ABOVE the true minimum --
+    measured, not hypothetical: dropping one block of a 12-variable instance
+    returned -42.0 against a true minimum of -45.0, with no error. A certificate
+    that can silently overstate itself is worse than no certificate.
+    """
+    expected = {variable.name for variable in surrogate.variables}
+    seen: set[str] = set()
+    for index, block in enumerate(blocks):
+        names = {variable.name for variable in block.variables}
+        overlap = names & seen
+        if overlap:
+            raise ValueError(
+                f"blocks do not partition the variables: block {index} repeats "
+                f"{sorted(overlap)}, so their linear terms would be counted twice"
+            )
+        seen |= names
+    missing = expected - seen
+    extra = seen - expected
+    if missing or extra:
+        raise ValueError(
+            "blocks do not partition the surrogate's variables, so the computed "
+            "value is NOT a valid lower bound"
+            + (f"; missing from every block: {sorted(missing)}" if missing else "")
+            + (f"; present in a block but not the surrogate: {sorted(extra)}" if extra else "")
+        )
+
+
 def dropped_coupling_lower_bound(
     surrogate: LayerBSurrogate,
     blocks: list[LayerBSurrogate],
@@ -123,6 +156,7 @@ def dropped_coupling_lower_bound(
     the same statement against the true minimum on small instances, with a
     negative control showing the min(0, J) floor is load-bearing.
     """
+    _require_partition(surrogate, blocks)
     in_block: set[tuple[str, str]] = set()
     for block in blocks:
         in_block.update(block.quadratic.keys())

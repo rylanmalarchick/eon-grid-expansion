@@ -81,3 +81,34 @@ def test_dropping_the_negative_floor_breaks_the_bound() -> None:
         "flooring dropped couplings at 0 still produced a valid bound, so this "
         "test cannot distinguish the correct bound from the broken one"
     )
+
+
+def test_an_incomplete_partition_is_refused() -> None:
+    """The precondition the Lean proof assumes must be enforced in Python.
+
+    Omitting a block drops its LINEAR terms from the sum while leaving the
+    couplings it owned to be counted as "dropped". The result can exceed the
+    true minimum -- measured at -42.0 against a true minimum of -45.0 on
+    seed 2 -- and the certificate would then claim a tighter gap than reality.
+    """
+    surrogate = build_external_surrogate(
+        generate_fused_planted(12, seed=2, block_size=4, alpha=0.5)
+    )
+    blocks = decompose_surrogate(surrogate, block_size=3)
+    complete, _ = dropped_coupling_lower_bound(surrogate, blocks)
+    assert complete <= _true_minimum(surrogate) + 1e-9
+
+    for omitted in range(len(blocks)):
+        partial = [b for i, b in enumerate(blocks) if i != omitted]
+        with pytest.raises(ValueError, match="do not partition"):
+            dropped_coupling_lower_bound(surrogate, partial)
+
+
+def test_duplicated_blocks_are_refused() -> None:
+    """Counting a block twice double-counts its linear terms."""
+    surrogate = build_external_surrogate(
+        generate_fused_planted(12, seed=7, block_size=4, alpha=0.5)
+    )
+    blocks = decompose_surrogate(surrogate, block_size=3)
+    with pytest.raises(ValueError, match="repeats"):
+        dropped_coupling_lower_bound(surrogate, [*blocks, blocks[0]])
