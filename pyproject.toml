@@ -2,6 +2,7 @@
 name = "eon-grid-expansion"
 version = "0.0.1"
 description = "Quantum-enhanced grid expansion planning for the 2026 EON challenge"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 dependencies = [
     "pandapower>=2.14",

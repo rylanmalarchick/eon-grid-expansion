@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -86,6 +87,32 @@ def main() -> None:
                 checked += 1
                 if f"{value:.2f}" not in prose:
                     failures.append(f"congestion {label} {value:.2f} is not in the proposal")
+        break
+
+    # --- the attribution split -----------------------------------------
+    # This is the number that broke: the prose quoted a share computed from the
+    # here-and-now congestion run while a table three sections later printed the
+    # per-point-recourse value, and the two imply different splits. Pin it.
+    for candidate in congestion_files:
+        record = json.loads(candidate.read_text())
+        evaluations = record.get("evaluations", {})
+        if not {"status_quo", "reconfiguration_only", "plan"} <= set(evaluations):
+            break
+        def mw(label: str, _e: dict = evaluations) -> float:
+            return float(_e[label]["aggregate_metrics"]["weighted_congestion_mw"])
+        total = mw("status_quo") - mw("plan")
+        if total > 0:
+            build_share = 100.0 * (mw("reconfiguration_only") - mw("plan")) / total
+            checked += 1
+            # Match the number WITH its unit. A bare substring test passes on
+            # "55" hiding inside "1,855", which is how this guard would have
+            # missed the very drift it was added for.
+            if not re.search(rf"\b{build_share:.0f}\s*%", prose):
+                failures.append(
+                    f"build share {build_share:.0f}% is not in the proposal -- the "
+                    "attribution split must come from the here-and-now run, not "
+                    "from the recourse sweep"
+                )
         break
 
     # --- superseded values that must NOT reappear ----------------------

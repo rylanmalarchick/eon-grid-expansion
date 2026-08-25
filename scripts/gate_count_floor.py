@@ -86,20 +86,30 @@ def main() -> None:
         )
         sys.exit(1)
 
-    floor_per_layer = m + n - 1
-    logger.info("coupling graph n=%d m=%d connected; floor %d CNOT per cost layer",
-                n, m, floor_per_layer)
+    logger.info("surrogate coupling graph n=%d m=%d, connected", n, m)
 
     rows = []
     for row in table["rows"]:
         depth = int(row["qaoa_depth_p"])
-        rzz = int(row["logical"]["ops"].get("rzz", 0))
-        floor = floor_per_layer * depth
-        logical = CNOTS_PER_RZZ * rzz
+        ops = row["logical"]["ops"]
+        # Each ARM compiles its own cost graph: the penalty arm carries the
+        # complete graph the Hess term induces, the constrained arm only the
+        # surrogate's couplings. One shared floor would describe neither.
+        arm_edges = int(row.get("cost_graph_edges", m))
+        floor = (arm_edges + n - 1) * depth
+        # Every two-qubit gate counts, not just rzz. Counting rzz alone dropped
+        # the constrained arm's 40 rxx + 40 ryy mixer gates and made both arms
+        # report the same logical cost.
+        two_qubit_logical = sum(
+            count for name, count in ops.items()
+            if name in ("rzz", "rxx", "ryy", "cx", "cz")
+        )
+        logical = CNOTS_PER_RZZ * two_qubit_logical
         transpiled = int(row["transpiled"]["1"]["two_qubit_gates"])
         rows.append({
             "algorithm": row["algorithm"],
             "qaoa_depth_p": depth,
+            "cost_graph_edges": arm_edges,
             "cost_layer_cnot_floor": floor,
             "logical_cnot_equivalent": logical,
             "logical_over_floor": logical / floor,
@@ -115,7 +125,7 @@ def main() -> None:
     record = {
         "instance_id": table["instance_id"],
         "coupling_graph": {"vertices": n, "edges": m, "connected": True},
-        "floor_per_cost_layer": floor_per_layer,
+        "floor_note": "per-arm: (that arm's cost-graph edges + n - 1) per cost layer",
         "bound": (
             "Cao et al. 2025 (arXiv:2509.10070): m+n-1 CNOT for a connected "
             "graphic parity network"
