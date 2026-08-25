@@ -39,16 +39,16 @@ that date is superseded and must not be quoted:
 
 | Superseded | Replaced by |
 |---|---|
-| `congestion_seed7.SUPERSEDED_broken_physics/` | `congestion_seed7_fixed/` |
-| `s1_proper/`, `s1_proper_off/` | `layerA_fixed_20260808T221908Z/on_cc*.jsonl`, `off_cc*.jsonl` |
-| `s2_oberrhein/` | `layerA_fixed_20260808T221908Z/mv_oberrhein_f{1,2}_on.jsonl` |
-| `scenario_box/` | `layerA_fixed_20260808T221908Z/ieee33_box.json` |
-| `p3_quadratic/`, `s3_coverage_sweep/`, `s3_control/`, `mps_higherp/` | re-run in progress; the claims they supported are withdrawn in the proposal |
+| `experiments/results/congestion_seed7.SUPERSEDED_broken_physics/` | `experiments/results/congestion_seed7_fixed/` |
+| `experiments/results/s1_proper/`, `experiments/results/s1_proper_off/` | `experiments/results/layerA_fixed_20260808T221908Z/on_cc*.jsonl`, `off_cc*.jsonl` |
+| `experiments/results/s2_oberrhein/` | `experiments/results/layerA_fixed_20260808T221908Z/mv_oberrhein_f{1,2}_on.jsonl` |
+| `experiments/results/scenario_box/` | `experiments/results/layerA_fixed_20260808T221908Z/ieee33_box.json` |
+| `experiments/results/p3_quadratic/`, `experiments/results/s3_coverage_sweep/`, `experiments/results/s3_control/`, `experiments/results/mps_higherp/` | re-run in progress; the claims they supported are withdrawn in the proposal |
 
 They are kept rather than deleted so the retraction stays auditable.
 
-The synthetic tiers (`pathb_dense_1h/`, `scale_mps_rerun/`, `s4_transpile/`,
-`qiskit_validation/`) never passed through Layer A and are unaffected.
+The synthetic tiers (`experiments/results/pathb_dense_1h/`, `experiments/results/scale_mps_rerun/`, `experiments/results/s4_transpile/`,
+`experiments/results/qiskit_validation/`) never passed through Layer A and are unaffected.
 
 ## Proved, not measured
 
