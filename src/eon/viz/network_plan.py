@@ -131,7 +131,8 @@ def plot_plan_figure(
     opened = max(0, existing - closed)
     axis.set_title(
         f"{feeder_label} with the planned build\n"
-        f"{len(built)} new lines (blue); {closed} of {existing} lines closed, "
+        f"{len(built)} new line{'s' if len(built) != 1 else ''} (blue); "
+        f"{closed} of {existing} lines closed, "
         f"{opened} open (radial operation)",
         color=_TEXT, fontsize=10, pad=10,
     )
@@ -160,9 +161,21 @@ def plot_plan_figure(
     reduction = (
         (congestion[0] - congestion[2]) / congestion[0] * 100 if congestion[0] else 0.0
     )
+    # The title must follow the data. Under the corrected model the plan
+    # improves BOTH measures, so the old "trades congestion for voltage"
+    # framing is simply false; state whichever the numbers support.
+    build_share = (
+        (congestion[1] - congestion[2]) / (congestion[0] - congestion[2]) * 100
+        if congestion[0] != congestion[2] else 0.0
+    )
+    both_improve = voltage[2] < voltage[0] and congestion[2] < congestion[0]
+    tail = (
+        f"-- and {build_share:.0f}% of the relief comes from the new line"
+        if both_improve
+        else "-- and reconfiguration alone trades congestion for voltage"
+    )
     figure.suptitle(
-        f"Planned expansion cuts scenario-weighted congestion {reduction:.0f}% "
-        "-- and reconfiguration alone trades congestion for voltage",
+        f"Planned expansion cuts scenario-weighted congestion {reduction:.0f}% {tail}",
         color=_TEXT, fontsize=11.5, y=1.03,
     )
     figure.text(

@@ -19,7 +19,6 @@ one reassuring curve.
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 from pathlib import Path
 
 import matplotlib
@@ -51,17 +50,22 @@ def load_records(paths: list[Path]) -> list[dict]:
     return records
 
 
-def _deduplicate(records: list[dict]) -> list[dict]:
-    """Key on the ACTUAL variable count, never the requested neighborhood.
+def _x_size(record: dict) -> int:
+    """The size that varies is the CANDIDATE POOL, which is what sizes Layer A.
 
-    A neighborhood wider than the candidate set is clamped, so two requested
-    sizes can land on one real size; keeping both would draw a duplicate as if
-    it were an extra instance.
+    The surrogate variable count is fixed by the neighborhood (20 everywhere in
+    the corrected family), so keying on it collapses every run onto one x
+    position and hides the family entirely.
     """
+    return int(record.get("candidate_count") or record["coupling"]["variable_count"])
+
+
+def _deduplicate(records: list[dict]) -> list[dict]:
+    """One point per (Layer A size, seed, mode)."""
     best: dict[tuple[int, int, bool], dict] = {}
     for record in records:
         key = (
-            int(record["coupling"]["variable_count"]),
+            _x_size(record),
             int(record["seed"]),
             bool(record["enable_reconfiguration"]),
         )
@@ -99,7 +103,7 @@ def plot_hardness(records: list[dict], out_stem: Path) -> Path:
     ):
         if not subset:
             continue
-        xs = [r["coupling"]["variable_count"] for r in subset]
+        xs = [_x_size(r) for r in subset]
         ys = [r["layer_a"]["mip_gap"] for r in subset]
         left.scatter(
             xs, ys, s=58, color=color, marker=marker, label=label,
@@ -110,7 +114,7 @@ def plot_hardness(records: list[dict], out_stem: Path) -> Path:
         left,
         title="Layer A optimality gap after a 1800 s solve",
         ylabel="MIP gap",
-        xlabel="surrogate variable count",
+        xlabel="candidate-pool size (Layer A variables)",
     )
     left.legend(frameon=False, fontsize=8, labelcolor=_MUTED, loc="center right")
 
@@ -124,69 +128,55 @@ def plot_hardness(records: list[dict], out_stem: Path) -> Path:
             transform=left.transAxes, fontsize=7.6, color=_MUTED,
         )
 
-    # --- Panel B: coupling ratio per seed --------------------------------
-    by_seed: dict[int, list[dict]] = defaultdict(list)
-    for record in on:
-        by_seed[int(record["seed"])].append(record)
-    label_positions: list[float] = []
-    for index, seed in enumerate(sorted(by_seed)):
-        subset = sorted(by_seed[seed], key=lambda r: r["coupling"]["variable_count"])
-        xs = [r["coupling"]["variable_count"] for r in subset]
-        ys = [r["coupling"]["coupling_field_ratio"] for r in subset]
-        color = _SEED_COLORS[index % len(_SEED_COLORS)]
-        right.plot(
-            xs, ys,
-            marker=_SEED_MARKERS[index % len(_SEED_MARKERS)],
-            markersize=7, linewidth=1.9, color=color,
-            label=f"seed {seed}", zorder=3,
-            markeredgecolor="#fcfcfb", markeredgewidth=0.9,
+    # --- Panel B: coupling ratio, ON against OFF -------------------------
+    # The finding is the CONTRAST, so both modes go on one axis. Log scale is
+    # mandatory: the two families are ~10 orders of magnitude apart, and on a
+    # linear axis the ON series is a flat line on zero that reads as missing
+    # data rather than as the result.
+    for subset, color, label, marker in (
+        (off, _EXISTING, "reconfiguration OFF (control)", "s"),
+        (on, _BLUE, "reconfiguration ON", "o"),
+    ):
+        if not subset:
+            continue
+        right.scatter(
+            [_x_size(r) for r in subset],
+            [max(r["coupling"]["coupling_field_ratio"], 1e-12) for r in subset],
+            s=58, color=color, marker=marker, label=label, zorder=3,
+            edgecolors="#fcfcfb", linewidths=1.0,
         )
-        # Direct label at the right end, in text ink rather than the series
-        # colour; the marker beside it carries identity. Series that converge
-        # (two seeds both near-decoupled) would print their labels on top of
-        # each other, so stagger any that land within a few percent of the axis.
-        offset = 0.0
-        low, high = right.get_ylim()
-        # Stagger AWAY from the nearer axis edge, or the displaced label
-        # clips off the figure instead of merely overlapping.
-        direction = 1.0 if ys[-1] < 0.5 * (low + high) else -1.0
-        for placed in label_positions:
-            if abs(placed - ys[-1]) < 0.06 * max(high - low, 1.0):
-                offset += direction * 11.0
-        label_positions.append(ys[-1])
-        right.annotate(
-            f"seed {seed}",
-            xy=(xs[-1], ys[-1]), xytext=(6, offset), textcoords="offset points",
-            va="center", fontsize=7.8, color=_MUTED, zorder=4,
-        )
+    right.set_yscale("log")
     _style(
         right,
-        title="Layer B coupling strength |J|/|h| (reconfiguration ON)",
-        ylabel="coupling-to-field ratio",
-        xlabel="surrogate variable count",
+        title="Layer B coupling strength |J|/|h|",
+        ylabel="coupling-to-field ratio (log)",
+        xlabel="candidate-pool size (Layer A variables)",
     )
-    right.legend(frameon=False, fontsize=8, labelcolor=_MUTED)
+    # No legend here: both panels carry the same two series and the left panel
+    # already labels them. A second copy only competes with the data.
 
-    decoupled = [r for r in on if r["coupling"]["coupling_field_ratio"] < 2.0]
-    if decoupled:
-        right.text(
-            0.02, 0.42,
-            f"{len(decoupled)} of {len(on)} runs are near-decoupled\n"
-            "(|J|/|h| ~ 1) despite a time-limited Layer A",
-            transform=right.transAxes, fontsize=7.6, color=_MUTED,
-        )
+    on_max = max(r["coupling"]["coupling_field_ratio"] for r in on)
+    off_max = max(r["coupling"]["coupling_field_ratio"] for r in off) if off else 0.0
+    # The empty decade band between the two families, so the note sits in the
+    # gap it is describing instead of on top of the ON points.
+    right.text(
+        0.02, 0.42,
+        f"ON is decoupled (|J|/|h| < {on_max:.0e});\n"
+        f"the control reaches ~{off_max:.0f}.\n"
+        "Switching makes Layer A hard and the surrogate EASY.",
+        transform=right.transAxes, fontsize=7.6, color=_MUTED,
+    )
 
     # Only the sizes actually run are meaningful ticks; the default locator
     # invents 17, 18, 19 where no instance exists.
-    sizes = sorted({r["coupling"]["variable_count"] for r in rows})
+    sizes = sorted({_x_size(r) for r in rows})
     for axis in (left, right):
         axis.set_xticks(sizes)
         axis.set_xlim(min(sizes) - 1.5, max(sizes) + 2.5)
 
-    sizes = sorted({r["coupling"]["variable_count"] for r in on})
     figure.suptitle(
-        f"IEEE 33 instance family: time-limited at every size "
-        f"(n = {', '.join(str(s) for s in sizes)}), and Layer B hardness varies within it",
+        "IEEE 33 instance family: Layer A is time-limited at every pool size, "
+        "yet its surrogate decouples",
         color=_TEXT, fontsize=11.5, y=1.02,
     )
 

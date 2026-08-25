@@ -12,13 +12,13 @@ regenerates the whole set in order.
 
 | Claim in the proposal | Script | Artifact | Figure |
 |---|---|---|---|
-| Congestion 26.46 → 1.61 MW (94 %), two lines built | `scripts/congestion_metrics.py` | `experiments/results/congestion_seed7/` | `plan_ieee33.pdf` |
-| Worst case over the uncertainty box 4.13 MW; 0.00 % under-report; random 5-point set misses 53.6 % | `scripts/scenario_box_sweep.py` | `experiments/results/scenario_box/ieee33_box.json` | — |
-| 12/12 Layer A runs time-limited, gap 0.692–0.751, four variable counts | `scripts/reconfiguration_sweep.py` | `experiments/results/s1_proper/n{16,20,24,32}.jsonl` | `hardness_family.pdf` |
-| Reconfiguration-off control: optimal in 2.6–6.1 s | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/s1_proper_off/` | `hardness_family.pdf` |
-| 5 of 12 surrogates near-decoupled ($\|J\|/\|h\| \approx 1$) | (same records as above) | `experiments/results/s1_proper/` | `hardness_family.pdf` |
+| Congestion 4.02 → 0.56 MW (86 %), one line, 55 % of relief from the build | `scripts/congestion_metrics.py` | `experiments/results/congestion_seed7_fixed/` | `plan_ieee33.pdf` |
+| Worst case over the box 1.87 MW; 0.00 % under-report; random 5-point set misses 67.8 % | `scripts/scenario_box_sweep.py` | `experiments/results/layerA_fixed_20260808T221908Z/ieee33_box.json` | — |
+| 9/9 Layer A runs time-limited, gap 0.065–0.301, three candidate-pool sizes | `scripts/reconfiguration_sweep.py` | `experiments/results/layerA_fixed_20260808T221908Z/on_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
+| Reconfiguration-off control: optimal in 1.1–5.9 s | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/layerA_fixed_20260808T221908Z/off_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
+| **9 of 9** ON surrogates decoupled ($\|J\|/\|h\| \sim 10^{-9}$); OFF control reaches 87 | (same records as above) | `experiments/results/layerA_fixed_20260808T221908Z/` | `hardness_family.pdf` |
 | Scale tier: dense glasses open at 1 h, exact TN cannot contract | `scripts/pathb_spine.py` | `experiments/results/pathb_dense_1h/` | — |
-| MV Oberrhein closes in 4-22 s: the real feeder is NOT hard | `scripts/reconfiguration_sweep.py --feeders mv_oberrhein_f1` | `experiments/results/s2_oberrhein/` | — |
+| MV Oberrhein (BOTH feeders) closes in 2.3–10.6 s: the real feeder is NOT hard | `scripts/reconfiguration_sweep.py --feeders mv_oberrhein_f1,mv_oberrhein_f2` | `experiments/results/layerA_fixed_20260808T221908Z/mv_oberrhein_f{1,2}_on.jsonl` | — |
 | S3 coverage sweep: no consistent cop advantage over 5 subspace sizes | `scripts/random_feasible_control.py --hamming-weights` | `experiments/results/s3_coverage_sweep/` | `s3_coverage.pdf` |
 | MPS 62–82 % above the classical incumbent at $n=120$, two seeds, $\chi=64$ | `scripts/scale_mps_sweep.py` | `experiments/results/scale_mps_rerun/n120_160.jsonl` | — |
 | MPS within 1.2 % of optimum by $p=2$ at $n=20$ | `scripts/scale_mps_sweep.py` | `experiments/results/mps_higherp/` | — |
@@ -29,6 +29,26 @@ regenerates the whole set in order.
 | D14 certificate sandwiches the planted optimum | `scripts/qaoa_decomposition_run.py` | `experiments/results/qaoa_decomp_v2/` | — |
 | QAOA landscapes, cop vs vanilla vs warm-start | `scripts/qaoa_landscape.py` | `experiments/results/qaoa_p3/` | `p1_landscapes.pdf`, `excess_vs_depth.pdf`, `feasible_fraction_vs_depth.pdf` |
 | Fair baseline: cop 0.0000, warm 0.0000, penalty QAOA 0.89-1.52 | `scripts/qaoa_landscape.py --penalty-mode quadratic` | `experiments/results/p3_quadratic/landscape_corrected.jsonl` | — |
+
+
+## Superseded artifacts
+
+On 2026-08-08 four defects were fixed in the Layer A LinDistFlow model (see the
+proposal's *Negative results*). Every artifact derived from Layer A **before**
+that date is superseded and must not be quoted:
+
+| Superseded | Replaced by |
+|---|---|
+| `congestion_seed7.SUPERSEDED_broken_physics/` | `congestion_seed7_fixed/` |
+| `s1_proper/`, `s1_proper_off/` | `layerA_fixed_20260808T221908Z/on_cc*.jsonl`, `off_cc*.jsonl` |
+| `s2_oberrhein/` | `layerA_fixed_20260808T221908Z/mv_oberrhein_f{1,2}_on.jsonl` |
+| `scenario_box/` | `layerA_fixed_20260808T221908Z/ieee33_box.json` |
+| `p3_quadratic/`, `s3_coverage_sweep/`, `s3_control/`, `mps_higherp/` | re-run in progress; the claims they supported are withdrawn in the proposal |
+
+They are kept rather than deleted so the retraction stays auditable.
+
+The synthetic tiers (`pathb_dense_1h/`, `scale_mps_rerun/`, `s4_transpile/`,
+`qiskit_validation/`) never passed through Layer A and are unaffected.
 
 ## Proved, not measured
 
