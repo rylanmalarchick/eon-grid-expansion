@@ -178,11 +178,26 @@ def plot_plan_figure(
         f"Planned expansion cuts scenario-weighted congestion {reduction:.0f}% {tail}",
         color=_TEXT, fontsize=11.5, y=1.03,
     )
+    # Derived, not asserted: this caption claimed "TIME_LIMIT, not proven
+    # optimal" for weeks after the solve started closing to optimality.
+    layer_a = record.get("layer_a", {})
+    status = str(layer_a.get("termination_status", "unknown"))
+    gap = layer_a.get("mip_gap")
+    provenance = (
+        f"Layer A {status}"
+        + (f" at gap {gap:.3f}" if isinstance(gap, (int, float)) else "")
+        + (
+            "; the plan is provably near-optimal"
+            if status == "OPTIMAL"
+            else "; the plan is an incumbent, not a proven optimum"
+        )
+    )
     figure.text(
         0.005, -0.06,
-        "IEEE 33, stressed five-point scenarios. Plan = Layer A incumbent at a "
-        "1800 s solve (TIME_LIMIT, not proven optimal). LinDistFlow "
-        "fixed-builds evaluation of each configuration.",
+        f"IEEE 33, stressed five-point scenarios. {provenance}. Congestion is an "
+        "L1 |P|+|Q| excess against defaulted branch ratings -- read the ratio, "
+        "not the absolute MW. LinDistFlow fixed-builds evaluation of each "
+        "configuration.",
         color=_MUTED, fontsize=7.5,
     )
 
