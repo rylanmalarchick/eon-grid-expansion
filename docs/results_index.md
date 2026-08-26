@@ -12,13 +12,13 @@ regenerates the whole set in order.
 
 | Claim in the proposal | Script | Artifact | Figure |
 |---|---|---|---|
-| Congestion 4.02 → 0.56 MW (86 %), one line, 55 % of relief from the build | `scripts/congestion_metrics.py` | `experiments/results/congestion_seed7_fixed/` | `plan_ieee33.pdf` |
-| Worst case over the box 1.87 MW; 0.00 % under-report; random 5-point set misses 67.8 % | `scripts/scenario_box_sweep.py` | `experiments/results/layerA_fixed_20260808T221908Z/ieee33_box.json` | — |
-| 9/9 Layer A runs time-limited, gap 0.065–0.301, three candidate-pool sizes | `scripts/reconfiguration_sweep.py` | `experiments/results/layerA_fixed_20260808T221908Z/on_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
-| Reconfiguration-off control: optimal in 1.1–5.9 s | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/layerA_fixed_20260808T221908Z/off_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
-| **9 of 9** ON surrogates decoupled ($\|J\|/\|h\| \sim 10^{-9}$); OFF control reaches 87 | (same records as above) | `experiments/results/layerA_fixed_20260808T221908Z/` | `hardness_family.pdf` |
+| Congestion 4.02 → 0.56 MW (86 %), one line, 54 % of relief from the build | `scripts/congestion_metrics.py` | `experiments/results/congestion_v2/` | `plan_ieee33.pdf` |
+| Worst case over the box 1.87 MW; 0.00 % under-report; random 5-point set misses 67.8 % | `scripts/scenario_box_sweep.py` | `experiments/results/layerA_v2_20260826T173217Z/ieee33_box.json` | — |
+| Feeder tier is NOT hard: IEEE 33 closes to proven optimality in 71–155 s once the voltage units are correct | `scripts/reconfiguration_sweep.py --layer-a-only` | `experiments/results/layerA_v2_20260826T173217Z/on_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
+| Reconfiguration-off control: optimal in 1.1–5.9 s | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/layerA_v2_20260826T173217Z/off_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
+| Coupling diagnostic WITHDRAWN as unsound (sentinel scoring, median over a bimodal distribution, below its own noise floor) | — | records carry `coupling: null` under `--layer-a-only` | — |
 | Scale tier: dense glasses open at 1 h, exact TN cannot contract | `scripts/pathb_spine.py` | `experiments/results/pathb_dense_1h/` | — |
-| MV Oberrhein (BOTH feeders) closes in 2.3–10.6 s: the real feeder is NOT hard | `scripts/reconfiguration_sweep.py --feeders mv_oberrhein_f1,mv_oberrhein_f2` | `experiments/results/layerA_fixed_20260808T221908Z/mv_oberrhein_f{1,2}_on.jsonl` | — |
+| MV Oberrhein (BOTH feeders) closes in 2.3–10.6 s: the real feeder is NOT hard | `scripts/reconfiguration_sweep.py --feeders mv_oberrhein_f1,mv_oberrhein_f2` | `experiments/results/layerA_v2_20260826T173217Z/mv_oberrhein_f{1,2}_on.jsonl` | — |
 | S3 coverage sweep: no consistent cop advantage over 5 subspace sizes | `scripts/random_feasible_control.py --hamming-weights` | `experiments/results/s3_coverage_sweep/` | `s3_coverage.pdf` |
 | MPS 62–82 % above the classical incumbent at $n=120$, two seeds, $\chi=64$ | `scripts/scale_mps_sweep.py` | `experiments/results/scale_mps_rerun/n120_160.jsonl` | — |
 | MPS within 1.2 % of optimum by $p=2$ at $n=20$ | `scripts/scale_mps_sweep.py` | `experiments/results/mps_higherp/` | — |
@@ -33,16 +33,23 @@ regenerates the whole set in order.
 
 ## Superseded artifacts
 
+The 2026-08-26 voltage-units fix superseded the `layerA_fixed_20260808T221908Z`
+set in turn: voltage limits had been applied to SQUARED voltage, inflating the
+dominant objective term. Correcting it made the feeder instances close in
+minutes, which is the submission's headline negative result. Artifacts from that
+generation are retained but must not be quoted.
+
+
 On 2026-08-08 four defects were fixed in the Layer A LinDistFlow model (see the
 proposal's *Negative results*). Every artifact derived from Layer A **before**
 that date is superseded and must not be quoted:
 
 | Superseded | Replaced by |
 |---|---|
-| `experiments/results/congestion_seed7.SUPERSEDED_broken_physics/` | `experiments/results/congestion_seed7_fixed/` |
-| `experiments/results/s1_proper/`, `experiments/results/s1_proper_off/` | `experiments/results/layerA_fixed_20260808T221908Z/on_cc*.jsonl`, `off_cc*.jsonl` |
-| `experiments/results/s2_oberrhein/` | `experiments/results/layerA_fixed_20260808T221908Z/mv_oberrhein_f{1,2}_on.jsonl` |
-| `experiments/results/scenario_box/` | `experiments/results/layerA_fixed_20260808T221908Z/ieee33_box.json` |
+| `experiments/results/congestion_seed7.SUPERSEDED_broken_physics/` | `experiments/results/congestion_v2/` |
+| `experiments/results/s1_proper/`, `experiments/results/s1_proper_off/` | `experiments/results/layerA_v2_20260826T173217Z/on_cc*.jsonl`, `off_cc*.jsonl` |
+| `experiments/results/s2_oberrhein/` | `experiments/results/layerA_v2_20260826T173217Z/mv_oberrhein_f{1,2}_on.jsonl` |
+| `experiments/results/scenario_box/` | `experiments/results/layerA_v2_20260826T173217Z/ieee33_box.json` |
 | `experiments/results/p3_quadratic/`, `experiments/results/s3_coverage_sweep/`, `experiments/results/s3_control/`, `experiments/results/mps_higherp/` | re-run in progress; the claims they supported are withdrawn in the proposal |
 
 They are kept rather than deleted so the retraction stays auditable.
