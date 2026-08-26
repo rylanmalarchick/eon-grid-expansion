@@ -13,12 +13,12 @@ regenerates the whole set in order.
 | Claim in the proposal | Script | Artifact | Figure |
 |---|---|---|---|
 | Congestion 4.02 → 0.56 MW (86 %), one line, 54 % of relief from the build | `scripts/congestion_metrics.py` | `experiments/results/congestion_v2/` | `plan_ieee33.pdf` |
-| Worst case over the box 1.87 MW; 0.00 % under-report; random 5-point set misses 67.8 % | `scripts/scenario_box_sweep.py` | `experiments/results/layerA_v2_20260826T173217Z/ieee33_box.json` | — |
+| Worst case over the box 1.87 MW; 0.00 % under-report; random 5-point set misses 67.4 % | `scripts/scenario_box_sweep.py` | `experiments/results/layerA_v2_20260826T173217Z/ieee33_box.json` | — |
 | Feeder tier is NOT hard: IEEE 33 closes to proven optimality in 71–155 s once the voltage units are correct | `scripts/reconfiguration_sweep.py --layer-a-only` | `experiments/results/layerA_v2_20260826T173217Z/on_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
-| Reconfiguration-off control: optimal in 1.1–5.9 s | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/layerA_v2_20260826T173217Z/off_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
+| Reconfiguration-off control: optimal in 0.7–1.8 s (~180x faster than ON) | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/layerA_v2_20260826T173217Z/off_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
 | Coupling diagnostic WITHDRAWN as unsound (sentinel scoring, median over a bimodal distribution, below its own noise floor) | — | records carry `coupling: null` under `--layer-a-only` | — |
 | Scale tier: dense glasses open at 1 h, exact TN cannot contract | `scripts/pathb_spine.py` | `experiments/results/pathb_dense_1h/` | — |
-| MV Oberrhein (BOTH feeders) closes in 2.3–10.6 s: the real feeder is NOT hard | `scripts/reconfiguration_sweep.py --feeders mv_oberrhein_f1,mv_oberrhein_f2` | `experiments/results/layerA_v2_20260826T173217Z/mv_oberrhein_f{1,2}_on.jsonl` | — |
+| MV Oberrhein (BOTH feeders) closes in 1.2–3.7 s at the 1 % tolerance: the real feeder is NOT hard | `scripts/reconfiguration_sweep.py --feeders mv_oberrhein_f1,mv_oberrhein_f2` | `experiments/results/layerA_v2_20260826T173217Z/mv_oberrhein_f{1,2}_on.jsonl` | — |
 | S3 coverage sweep: no consistent cop advantage over 5 subspace sizes | `scripts/random_feasible_control.py --hamming-weights` | `experiments/results/s3_coverage_sweep/` | `s3_coverage.pdf` |
 | MPS 62–82 % above the classical incumbent at $n=120$, two seeds, $\chi=64$ | `scripts/scale_mps_sweep.py` | `experiments/results/scale_mps_rerun/n120_160.jsonl` | — |
 | MPS within 1.2 % of optimum by $p=2$ at $n=20$ | `scripts/scale_mps_sweep.py` | `experiments/results/mps_higherp/` | — |
