@@ -208,6 +208,14 @@ def solve_lindistflow_expansion(
     # sn_mva times too large -- 10x on IEEE 33, which is what pinned every
     # scenario's voltage at its variable bound.
     mva_base = max(float(net.sn_mva), 1e-6)
+    # v_bus is SQUARED voltage (the drop equation carries the factor 2), so the
+    # documented per-unit magnitude band has to be squared before it is applied
+    # to it. Applying 0.95/1.05 directly enforced [0.9747, 1.0247] in magnitude
+    # -- less than half the intended width, on the wrong quantity. The slack
+    # variables below are therefore squared-voltage deficits; the REPORTED
+    # violation is recomputed in magnitude, see _magnitude_violation.
+    v_min_sq = cfg.voltage_min_pu ** 2
+    v_max_sq = cfg.voltage_max_pu ** 2
 
     for scenario in scenarios:
         import_p[scenario.name] = model.addVar(lb=0.0, name=f"grid_import[{scenario.name}]")
@@ -229,11 +237,11 @@ def solve_lindistflow_expansion(
                 name=f"curtail[{scenario.name},{bus}]",
             )
             model.addConstr(
-                v_bus[(scenario.name, bus)] + v_low[(scenario.name, bus)] >= cfg.voltage_min_pu,
+                v_bus[(scenario.name, bus)] + v_low[(scenario.name, bus)] >= v_min_sq,
                 name=f"voltage_min[{scenario.name},{bus}]",
             )
             model.addConstr(
-                v_bus[(scenario.name, bus)] - v_high[(scenario.name, bus)] <= cfg.voltage_max_pu,
+                v_bus[(scenario.name, bus)] - v_high[(scenario.name, bus)] <= v_max_sq,
                 name=f"voltage_max[{scenario.name},{bus}]",
             )
         model.addConstr(
@@ -426,12 +434,16 @@ def solve_lindistflow_expansion(
             loading_map: dict[str, float] = {}
             thermal = 0.0
             voltage_violation = 0.0
+            # Recompute from the bus voltages rather than summing the squared
+            # slacks: the objective may penalise a monotone proxy, but a number
+            # this document prints as "pu" must be a per-unit magnitude.
             curtailment = 0.0
             loss_proxy = 0.0
             for bus in buses:
-                voltage_violation += (
-                    optimization.variable_values[v_low[(scenario.name, bus)].VarName]
-                    + optimization.variable_values[v_high[(scenario.name, bus)].VarName]
+                squared = voltage_map[bus]
+                magnitude = squared**0.5 if squared > 0.0 else 0.0
+                voltage_violation += max(0.0, cfg.voltage_min_pu - magnitude) + max(
+                    0.0, magnitude - cfg.voltage_max_pu
                 )
                 curtailment += optimization.variable_values[curtail[(scenario.name, bus)].VarName]
             for line in all_lines:

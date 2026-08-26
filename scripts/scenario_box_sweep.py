@@ -57,7 +57,25 @@ CANDIDATE_COUNT = 24
 COST_PER_KM = 10_000.0
 # The headline plan (scripts/congestion_metrics.py, seed 7). Passed as a fixed
 # build set so no Layer A solve is needed and the sweep is cheap to reproduce.
-PLAN_BUILDS = ("community_bridging_0_17_24", "community_bridging_16_19_20")
+# The plan under test is READ from the headline artifact, never hard-coded.
+# A literal here silently went stale across the 2026-08-08 model correction: it
+# named the old TWO-line plan while the corrected headline plan is one line, so
+# the whole robustness section described a plan the document does not report.
+PLAN_BUILDS: tuple[str, ...] = ()
+
+
+def _load_plan_builds(path: Path) -> tuple[str, ...]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"cannot read the plan under test from {path}. The box sweep must "
+            "evaluate the SAME build set the headline reports; pass "
+            "--plan-from to point at the congestion metrics artifact."
+        )
+    record = json.loads(path.read_text())
+    builds = tuple(record["layer_a"]["selected_candidates"])
+    if not builds:
+        raise ValueError(f"{path} records no selected candidates; nothing to evaluate")
+    return builds
 SAMPLE_BUDGETS = (5, 10, 25, 50, 100)
 SAMPLE_SEEDS = 200
 
@@ -325,7 +343,15 @@ def main() -> None:
         help="recompute the summary from an existing record's evaluations, no solves",
     )
     parser.add_argument("--out", default="")
+    parser.add_argument(
+        "--plan-from",
+        default="experiments/results/congestion_seed7_fixed/metrics.json",
+        help="artifact whose Layer A plan this sweep evaluates; read, never assumed",
+    )
     args = parser.parse_args()
+    global PLAN_BUILDS
+    PLAN_BUILDS = _load_plan_builds(Path(args.plan_from))
+    logger.info("plan under test (from %s): %s", args.plan_from, list(PLAN_BUILDS))
 
     if args.resummarize:
         source = Path(args.resummarize)

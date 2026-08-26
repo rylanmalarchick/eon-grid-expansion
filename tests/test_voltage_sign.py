@@ -112,3 +112,82 @@ def test_agrees_with_ac_power_flow(load_scale: float, tol: float) -> None:
         f"bus {worst}: model {modelled[worst]:.4f} pu vs AC "
         f"{reference.res_bus.vm_pu[worst]:.4f} pu (error {error:+.4f})"
     )
+
+
+def _ac_on_topology(feeder: str, load_scale: float, closed: set[str]):
+    """AC solution of the SAME switching configuration the model chose.
+
+    Comparing a reconfiguration-ON solve against the as-operated topology is not
+    like-for-like: the model is free to re-switch, so it legitimately reports a
+    healthier feeder than the as-operated one. Mirroring its closed set onto the
+    AC network is the comparison that actually tests the relaxation.
+    """
+    reference = load_distribution_feeder(feeder)
+    reference.load.p_mw *= load_scale
+    reference.load.q_mvar *= load_scale
+    for index in reference.line.index:
+        reference.line.at[index, "in_service"] = f"line_{index}" in closed
+    pp.runpp(reference)
+    return reference
+
+
+@pytest.mark.requires_gurobi
+@pytest.mark.parametrize("load_scale, tol", [(1.0, 0.02), (1.7, 0.03)])
+def test_agrees_with_ac_under_reconfiguration(load_scale: float, tol: float) -> None:
+    """The gate must cover the configuration the results actually use.
+
+    Every headline number is produced with reconfiguration ON, and until this
+    test existed the AC cross-check ran only with it OFF and no candidates.
+    """
+    net = load_distribution_feeder("ieee33")
+    scenarios = [
+        Scenario(name="s", load_scale=load_scale, generation_scale=1.0,
+                 probability=1.0, line_capacity_scale=1.0)
+    ]
+    result = solve_lindistflow_expansion(
+        net, scenarios, [],
+        ExpansionProblemConfig(max_new_lines=3, time_limit_s=180.0,
+                               enable_reconfiguration=True, threads=1),
+        fixed_builds={},
+    )
+    assert result.bus_voltage_pu, f"no solution: {result.termination_status}"
+    reference = _ac_on_topology("ieee33", load_scale, set(result.metadata["closed_lines"]))
+
+    modelled = {bus: value**0.5 for bus, value in result.bus_voltage_pu["s"].items()}
+    worst = max(modelled, key=lambda b: abs(modelled[b] - reference.res_bus.vm_pu[b]))
+    error = modelled[worst] - reference.res_bus.vm_pu[worst]
+    assert abs(error) <= tol, (
+        f"reconfiguration ON, bus {worst}: model {modelled[worst]:.4f} pu vs AC "
+        f"{reference.res_bus.vm_pu[worst]:.4f} on the same topology ({error:+.4f})"
+    )
+
+
+@pytest.mark.requires_gurobi
+def test_oberrhein_relaxation_error_is_bounded_and_pessimistic() -> None:
+    """MV Oberrhein does NOT meet the IEEE 33 tolerance, and we pin the gap.
+
+    On a 20 kV cable feeder the relaxation drops line charging susceptance, so
+    it reads PESSIMISTIC -- the opposite direction to IEEE 33, where a lossless
+    linearisation reads optimistic. This test records the size and the sign
+    rather than asserting a tolerance the model does not meet, so a future
+    change that makes it worse is caught.
+    """
+    net = load_distribution_feeder("mv_oberrhein_f2")
+    scenarios = [
+        Scenario(name="s", load_scale=1.0, generation_scale=1.0,
+                 probability=1.0, line_capacity_scale=1.0)
+    ]
+    result = solve_lindistflow_expansion(
+        net, scenarios, [],
+        ExpansionProblemConfig(max_new_lines=3, time_limit_s=180.0,
+                               enable_reconfiguration=False, threads=1),
+        fixed_builds={},
+    )
+    assert result.bus_voltage_pu, f"no solution: {result.termination_status}"
+    reference = load_distribution_feeder("mv_oberrhein_f2")
+    pp.runpp(reference)
+    modelled = {bus: value**0.5 for bus, value in result.bus_voltage_pu["s"].items()}
+    worst = max(modelled, key=lambda b: abs(modelled[b] - reference.res_bus.vm_pu[b]))
+    error = modelled[worst] - reference.res_bus.vm_pu[worst]
+    assert error < 0.0, "expected the relaxation to read pessimistic on a cable feeder"
+    assert abs(error) <= 0.05, f"Oberrhein error grew to {error:+.4f} pu"

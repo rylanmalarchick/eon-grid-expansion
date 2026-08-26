@@ -84,6 +84,20 @@ def _load_mv_oberrhein_feeder(name: str) -> pp.pandapowerNet:
     # under this abstraction, and keeping them would silently re-mesh it.
     tie_lines = [index for index in subnet.line.index if int(index) in open_lines]
     subnet.line = subnet.line.drop(index=tie_lines)
+    # Dropping a line leaves any switch that referenced it dangling, and
+    # pandapower's power flow then raises a bare KeyError on the missing index.
+    # Until this was cleaned, runpp could not run on EITHER Oberrhein feeder,
+    # so the "the larger real feeder is easier" comparison rested on a network
+    # no AC solve had ever touched.
+    if len(subnet.switch):
+        live_lines = set(subnet.line.index)
+        dangling = [
+            index
+            for index, row in subnet.switch.iterrows()
+            if row.et == "l" and int(row.element) not in live_lines
+        ]
+        if dangling:
+            subnet.switch = subnet.switch.drop(index=dangling)
     # The HV slack and its transformer are outside the feeder; the substation
     # LV busbar becomes the slack, as in IEEE 33/123.
     subnet.ext_grid = subnet.ext_grid.iloc[0:0]
