@@ -71,7 +71,7 @@ def main() -> None:
     # The pre-2026-08-08 artifact came from a Layer A model with an inverted
     # voltage sign and three other defects; it is quarantined, not deleted, so
     # the retraction stays auditable. Read only the corrected one.
-    congestion = root / "congestion_seed7_fixed"
+    congestion = root / "congestion_v2"
     congestion_files = sorted(congestion.glob("*.json"))
     if not congestion_files:
         raise FileNotFoundError(

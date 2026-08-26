@@ -36,9 +36,10 @@ from eon.formulations.layer_b import LayerBSolution, solve_layer_b_surrogate
 from eon.formulations.lindistflow import (
     ExpansionProblemConfig,
     ExpansionResult,
+    solve_lindistflow_expansion,
     suggested_flow_big_m_mva,
 )
-from eon.instances.candidate_lines import require_seed_diversification
+from eon.instances.candidate_lines import generate_candidate_lines, require_seed_diversification
 from eon.instances.distribution_feeders import load_distribution_feeder
 from eon.instances.hardness_classifier import (
     _compute_baseline_stress,
@@ -88,7 +89,8 @@ def run_instance(
     qaoa_rounds_list: list[int],
     angle_iterations: int,
     rank_jitter: float,
-    net: object,
+    layer_a_only: bool = False,
+    net: object = None,
     scenarios: list,
     baseline_stress: dict[int, float],
     run_meta: dict[str, object],
@@ -104,6 +106,48 @@ def run_instance(
         # (silent INFEASIBLE, 2026-08-01). No-op for IEEE 33/123.
         flow_big_m_mva=suggested_flow_big_m_mva(net, scenarios),
     )
+    if layer_a_only:
+        # Solve Layer A and stop. The surrogate build below is ~140 further MILP
+        # evaluations per instance, and its only consumer is the coupling
+        # diagnostic this project has withdrawn as unsound, so paying for it
+        # when the question is solver hardness buys nothing.
+        candidates = generate_candidate_lines(
+            net,
+            family,
+            candidate_count,
+            seed=seed,
+            cost_per_km=COST_PER_KM,
+            stress_info=baseline_stress if family == "useful_adversarial" else None,
+            rank_jitter=rank_jitter,
+        )
+        layer_a = solve_lindistflow_expansion(net, scenarios, candidates, config)
+        yield {
+            "instance_id": f"{feeder}:{family}:seed{seed}:layerA",
+            "feeder": feeder,
+            "family": family,
+            "seed": seed,
+            "candidate_count": candidate_count,
+            "neighborhood_size": neighborhood_size,
+            "enable_reconfiguration": reconfiguration,
+            "with_mps": False,
+            "layer_a_only": True,
+            "layer_a": {
+                "termination_status": layer_a.termination_status,
+                "mip_gap": layer_a.mip_gap,
+                "best_bound": layer_a.best_bound,
+                "objective_value": layer_a.objective_value,
+                "runtime_s": layer_a.runtime_s,
+                "n_builds": len(layer_a.selected_candidates),
+                "selected_candidates": list(layer_a.selected_candidates),
+            },
+            "coupling": None,
+            "layer_b": None,
+            "tree_tn": None,
+            "mps": None,
+            "run": run_meta,
+        }
+        return
+
     candidates, layer_a, surrogate = build_instance_surrogate(
         net,
         scenarios,
@@ -324,6 +368,14 @@ def main() -> None:
         "--angle-iterations", type=int, default=10, help="QAOA angle-optimization iterations."
     )
     parser.add_argument(
+        "--layer-a-only",
+        action="store_true",
+        help="Record the Layer A solve and skip the Layer B surrogate. The "
+        "surrogate build is ~140 extra MILP evaluations per instance and its "
+        "only consumer is the coupling diagnostic, which this project has "
+        "withdrawn as unsound. Use when the question is solver hardness.",
+    )
+    parser.add_argument(
         "--rank-jitter",
         type=float,
         default=0.0,
@@ -365,6 +417,7 @@ def main() -> None:
         "timestamp_utc": stamp,
         "scenario_kind": SCENARIO_KIND,
         "rank_jitter": args.rank_jitter,
+        "layer_a_only": args.layer_a_only,
         "seed_diversifies": args.rank_jitter > 0.0,
     }
 
@@ -414,6 +467,7 @@ def main() -> None:
                     qaoa_rounds_list=qaoa_rounds_list,
                     angle_iterations=args.angle_iterations,
                     rank_jitter=args.rank_jitter,
+                    layer_a_only=args.layer_a_only,
                     net=nets[feeder],
                     scenarios=scenarios,
                     baseline_stress=baseline_stress[feeder],
