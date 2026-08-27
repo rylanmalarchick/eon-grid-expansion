@@ -107,7 +107,8 @@ def main() -> None:
             # Match the number WITH its unit. A bare substring test passes on
             # "55" hiding inside "1,855", which is how this guard would have
             # missed the very drift it was added for.
-            if not re.search(rf"\b{build_share:.0f}\s*%", prose):
+            # Accept "54 %" or "54 percent": the document spells the unit out.
+            if not re.search(rf"\b{build_share:.0f}\s*(?:%|percent)\b", prose):
                 failures.append(
                     f"build share {build_share:.0f}% is not in the proposal -- the "
                     "attribution split must come from the here-and-now run, not "
