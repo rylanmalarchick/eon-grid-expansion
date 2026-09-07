@@ -19,16 +19,13 @@ regenerates the whole set in order.
 | Coupling diagnostic WITHDRAWN as unsound (sentinel scoring, median over a bimodal distribution, below its own noise floor) | — | records carry `coupling: null` under `--layer-a-only` | — |
 | Scale tier: dense glasses open at 1 h, exact TN cannot contract | `scripts/pathb_spine.py` | `experiments/results/pathb_dense_1h/` | — |
 | MV Oberrhein (BOTH feeders) closes in 1.2–3.7 s at the 1 % tolerance: the real feeder is NOT hard | `scripts/reconfiguration_sweep.py --feeders mv_oberrhein_f1,mv_oberrhein_f2` | `experiments/results/layerA_v2_20260826T173217Z/mv_oberrhein_f{1,2}_on.jsonl` | — |
-| S3 coverage sweep: no consistent cop advantage over 5 subspace sizes | `scripts/random_feasible_control.py --hamming-weights` | `experiments/results/s3_coverage_sweep/` | `s3_coverage.pdf` |
 | MPS 62–82 % above the classical incumbent at $n=120$, two seeds, $\chi=64$ | `scripts/scale_mps_sweep.py` | `experiments/results/scale_mps_rerun/n120_160.jsonl` | — |
 | MPS within 1.2 % of optimum by $p=2$ at $n=20$ | `scripts/scale_mps_sweep.py` | `experiments/results/mps_higherp/` | — |
 | Random-feasible control: optimum in 24/25 repeats; cop does not beat the median | `scripts/random_feasible_control.py` | `experiments/results/s3_control/control.jsonl` | — |
-| Transpiled depth 1,118 vs 3,812,541 (≈3,400×) | `scripts/transpile_table.py` | `experiments/results/s4_transpile/table.json` | — |
-| Distance above a proven CNOT floor: 4.1× vs 5,918× | `scripts/gate_count_floor.py` | `experiments/results/s4_transpile/gate_floor.json` | — |
+| Transpiled depth 1,725 vs 3,812,541 (2,210×); two-qubit 1,855 vs 1,751,882 (944×) | `scripts/transpile_table.py` | `experiments/results/s4_transpile/table_corrected.json` | — |
+| Distance above a proven CNOT floor: 4.4× vs 5,918× | `scripts/gate_count_floor.py` | `experiments/results/s4_transpile/gate_floor_corrected.json` | — |
 | Aer vs exact engine agree to 0.06 σ | `scripts/qiskit_validation.py` | `experiments/results/qiskit_validation/` | — |
 | D14 certificate sandwiches the planted optimum | `scripts/qaoa_decomposition_run.py` | `experiments/results/qaoa_decomp_v2/` | — |
-| QAOA landscapes, cop vs vanilla vs warm-start | `scripts/qaoa_landscape.py` | `experiments/results/qaoa_p3/` | `p1_landscapes.pdf`, `excess_vs_depth.pdf`, `feasible_fraction_vs_depth.pdf` |
-| Fair baseline: cop 0.0000, warm 0.0000, penalty QAOA 0.89-1.52 | `scripts/qaoa_landscape.py --penalty-mode quadratic` | `experiments/results/p3_quadratic/landscape_corrected.jsonl` | — |
 
 
 ## Superseded artifacts
@@ -50,12 +47,19 @@ that date is superseded and must not be quoted:
 | `experiments/results/s1_proper/`, `experiments/results/s1_proper_off/` | `experiments/results/layerA_v2_20260826T173217Z/on_cc*.jsonl`, `off_cc*.jsonl` |
 | `experiments/results/s2_oberrhein/` | `experiments/results/layerA_v2_20260826T173217Z/mv_oberrhein_f{1,2}_on.jsonl` |
 | `experiments/results/scenario_box/` | `experiments/results/layerA_v2_20260826T173217Z/ieee33_box.json` |
-| `experiments/results/p3_quadratic/`, `experiments/results/s3_coverage_sweep/`, `experiments/results/s3_control/`, `experiments/results/mps_higherp/` | re-run in progress; the claims they supported are withdrawn in the proposal |
+| `experiments/results/p3_quadratic/`, `experiments/results/s3_coverage_sweep/`, `experiments/results/qaoa_p3/` | the constrained-versus-penalty comparison they supported is WITHDRAWN in the proposal and has no replacement |
+| `experiments/results/s4_transpile/table.json`, `experiments/results/s4_transpile/gate_floor.json` | `table_corrected.json`, `gate_floor_corrected.json`. The originals transpiled BOTH arms penalty-free, which gave the penalty arm a cost graph its encoding never induces. The proposal retracts their figures (1,118 depth, 4.1x over floor, the 3,400x gap) |
 
 They are kept rather than deleted so the retraction stays auditable.
 
 The synthetic tiers (`experiments/results/pathb_dense_1h/`, `experiments/results/scale_mps_rerun/`, `experiments/results/s4_transpile/`,
 `experiments/results/qiskit_validation/`) never passed through Layer A and are unaffected.
+
+`experiments/results/mps_higherp/` and `experiments/results/s3_control/` are also
+synthetic-instance runs that never passed through Layer A. They back two claims the
+proposal still makes: MPS reaching the optimum by $p=2$ at $n=20$, and uniform random
+sampling of the feasible subspace finding the optimum in 24 of 25 repeats. The proposal
+states that both predate the Layer A correction.
 
 ## Proved, not measured
 
