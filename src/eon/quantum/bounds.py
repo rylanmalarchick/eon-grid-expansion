@@ -16,8 +16,7 @@ So the epistemic status lives in the type:
                         far from it.
 
 Pairing them is the only way to build a gap, and the constructor refuses a
-mismatch. Compare `separation.jl` in the LANL robust-compilation work, which
-splits `HeuristicSeparation` from `CertifiedSeparation` for the same reason.
+mismatch.
 """
 
 from __future__ import annotations
