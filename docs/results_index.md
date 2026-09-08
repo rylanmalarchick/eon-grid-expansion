@@ -14,9 +14,9 @@ regenerates the whole set in order.
 |---|---|---|---|
 | Congestion 4.02 → 0.56 MW (86 %), one line, 54 % of relief from the build | `scripts/congestion_metrics.py` | `experiments/results/congestion_v2/` | `plan_ieee33.pdf` |
 | Worst case over the box 1.87 MW; 0.00 % under-report; random 5-point set misses 67.4 % | `scripts/scenario_box_sweep.py` | `experiments/results/layerA_v2_20260826T173217Z/ieee33_box.json` | — |
-| Feeder tier is NOT hard: IEEE 33 closes to proven optimality in 71–155 s once the voltage units are correct | `scripts/reconfiguration_sweep.py --layer-a-only` | `experiments/results/layerA_v2_20260826T173217Z/on_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
-| Reconfiguration-off control: optimal in 0.7–1.8 s (~180x faster than ON) | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/layerA_v2_20260826T173217Z/off_cc{24,30,36}.jsonl` | `hardness_family.pdf` |
-| Coupling diagnostic WITHDRAWN as unsound (sentinel scoring, median over a bimodal distribution, below its own noise floor) | — | records carry `coupling: null` under `--layer-a-only` | — |
+| Feeder tier is NOT hard: IEEE 33 closes to proven optimality in 72–419 s | `scripts/reconfiguration_sweep.py --layer-a-only` | `experiments/results/layerA_v2_20260826T173217Z/on_cc{24,30,36}.jsonl` | `feeder_runtimes.pdf` |
+| Reconfiguration-off control: optimal in 0.7–1.8 s (~180x faster than ON) | `scripts/reconfiguration_sweep.py --no-reconfiguration` | `experiments/results/layerA_v2_20260826T173217Z/off_cc{24,30,36}.jsonl` | `feeder_runtimes.pdf` |
+| Surrogate coupling: no claim made, the diagnostic is below its own noise floor | — | records carry `coupling: null` under `--layer-a-only` | — |
 | Scale tier: dense glasses open at 1 h, exact TN cannot contract | `scripts/pathb_spine.py` | `experiments/results/pathb_dense_1h/` | — |
 | MV Oberrhein (BOTH feeders) closes in 1.2–3.7 s at the 1 % tolerance: the real feeder is NOT hard | `scripts/reconfiguration_sweep.py --feeders mv_oberrhein_f1,mv_oberrhein_f2` | `experiments/results/layerA_v2_20260826T173217Z/mv_oberrhein_f{1,2}_on.jsonl` | — |
 | MPS 62–82 % above the classical incumbent at $n=120$, two seeds, $\chi=64$ | `scripts/scale_mps_sweep.py` | `experiments/results/scale_mps_rerun/n120_160.jsonl` | — |
@@ -30,36 +30,28 @@ regenerates the whole set in order.
 
 ## Superseded artifacts
 
-The 2026-08-26 voltage-units fix superseded the `layerA_fixed_20260808T221908Z`
-set in turn: voltage limits had been applied to SQUARED voltage, inflating the
-dominant objective term. Correcting it made the feeder instances close in
-minutes, which is the submission's headline negative result. Artifacts from that
-generation are retained but must not be quoted.
+The Layer A model was revised twice during the project. Artifacts written before a
+revision are retained so the mapping stays checkable, and must not be quoted. The current
+artifact for each claim is the one named in the table above.
 
-
-On 2026-08-08 four defects were fixed in the Layer A LinDistFlow model (see the
-proposal's *Negative results*). Every artifact derived from Layer A **before**
-that date is superseded and must not be quoted:
-
-| Superseded | Replaced by |
+| Superseded | Current |
 |---|---|
 | `experiments/results/congestion_seed7.SUPERSEDED_broken_physics/` | `experiments/results/congestion_v2/` |
 | `experiments/results/s1_proper/`, `experiments/results/s1_proper_off/` | `experiments/results/layerA_v2_20260826T173217Z/on_cc*.jsonl`, `off_cc*.jsonl` |
 | `experiments/results/s2_oberrhein/` | `experiments/results/layerA_v2_20260826T173217Z/mv_oberrhein_f{1,2}_on.jsonl` |
 | `experiments/results/scenario_box/` | `experiments/results/layerA_v2_20260826T173217Z/ieee33_box.json` |
-| `experiments/results/p3_quadratic/`, `experiments/results/s3_coverage_sweep/`, `experiments/results/qaoa_p3/` | the constrained-versus-penalty comparison they supported is WITHDRAWN in the proposal and has no replacement |
-| `experiments/results/s4_transpile/table.json`, `experiments/results/s4_transpile/gate_floor.json` | `table_corrected.json`, `gate_floor_corrected.json`. The originals transpiled BOTH arms penalty-free, which gave the penalty arm a cost graph its encoding never induces. The proposal retracts their figures (1,118 depth, 4.1x over floor, the 3,400x gap) |
-
-They are kept rather than deleted so the retraction stays auditable.
+| `experiments/results/layerA_fixed_20260808T221908Z/` | `experiments/results/layerA_v2_20260826T173217Z/` |
+| `experiments/results/p3_quadratic/`, `experiments/results/s3_coverage_sweep/`, `experiments/results/qaoa_p3/` | no current artifact: the proposal reports no constrained-versus-penalty comparison |
+| `experiments/results/s4_transpile/table.json`, `gate_floor.json` | `table_corrected.json`, `gate_floor_corrected.json`, which transpile each arm against the cost graph its own encoding induces |
 
 The synthetic tiers (`experiments/results/pathb_dense_1h/`, `experiments/results/scale_mps_rerun/`, `experiments/results/s4_transpile/`,
 `experiments/results/qiskit_validation/`) never passed through Layer A and are unaffected.
 
 `experiments/results/mps_higherp/` and `experiments/results/s3_control/` are also
 synthetic-instance runs that never passed through Layer A. They back two claims the
-proposal still makes: MPS reaching the optimum by $p=2$ at $n=20$, and uniform random
-sampling of the feasible subspace finding the optimum in 24 of 25 repeats. The proposal
-states that both predate the Layer A correction.
+proposal makes: MPS reaching the optimum by $p=2$ at $n=20$, and uniform random sampling
+of the feasible subspace finding the optimum in 24 of 25 repeats. Both predate the current
+Layer A model.
 
 ## Proved, not measured
 

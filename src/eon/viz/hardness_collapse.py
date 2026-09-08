@@ -140,3 +140,55 @@ def plot_collapse(
     figure.savefig(out_stem.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(figure)
     return png
+
+
+def plot_feeder_runtimes(after: list[dict], out_stem: Path) -> Path:
+    """Layer A termination time per feeder, from the current records alone.
+
+    One panel, no comparison against a superseded run. Every point is a solve
+    from the shipped artifacts, against the 1800 s limit the challenge's
+    "reasonable runtime" criterion is measured at.
+    """
+    by_feeder: dict[str, list[float]] = {}
+    for record in after:
+        if not record.get("enable_reconfiguration"):
+            continue
+        by_feeder.setdefault(str(record["feeder"]), []).append(
+            float(record["layer_a"]["runtime_s"])
+        )
+    if not by_feeder:
+        raise ValueError("no reconfiguration-on records to plot")
+
+    figure, axis = plt.subplots(1, 1, figsize=(7.0, 4.0))
+    names = sorted(by_feeder)
+    for index, name in enumerate(names):
+        values = by_feeder[name]
+        axis.scatter(
+            [index] * len(values), values, s=58, color=_AFTER, zorder=3,
+            edgecolors="#fcfcfb", linewidths=1.0,
+        )
+    axis.axhline(_LIMIT, color="#a33", linewidth=1.0, linestyle="--", zorder=2)
+    axis.text(
+        len(names) - 0.45, _LIMIT, " 1800 s limit", color="#a33",
+        fontsize=8, va="bottom", ha="right",
+    )
+    axis.set_yscale("log")
+    axis.set_xticks(list(range(len(names))))
+    axis.set_xticklabels(
+        [n.replace("mv_oberrhein_", "MV Oberrhein ").replace("ieee33", "IEEE 33")
+         for n in names],
+        fontsize=9,
+    )
+    axis.set_xlim(-0.6, len(names) - 0.4)
+    _style(
+        axis,
+        title="Layer A termination time, every feeder tested",
+        xlabel="",
+        ylabel="seconds to terminate (log)",
+    )
+    out_stem.parent.mkdir(parents=True, exist_ok=True)
+    png = out_stem.with_suffix(".png")
+    figure.savefig(png, dpi=200, bbox_inches="tight")
+    figure.savefig(out_stem.with_suffix(".pdf"), bbox_inches="tight")
+    plt.close(figure)
+    return png
