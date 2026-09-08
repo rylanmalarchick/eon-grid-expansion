@@ -1,17 +1,59 @@
+import functools
 import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 
 from eon.mps.juliqaoa_smoke import _synthetic_surrogate
 from eon.mps.protocol import run_mps_protocol
 
-# The MPS backend shells out to Julia. Without it run_mps_protocol degrades to
-# an exact brute force at small n, so this test would assert the fallback's
-# backend name and fail for a reason that has nothing to do with the code under
-# test. Name the dependency instead of letting it look like a regression.
+_JULIA_PROJECT = Path(__file__).resolve().parents[1] / "julia"
+_JULIA_PACKAGES = (
+    "JSON3, JuliQAOA, ITensorMPS, ITensors, Optim, GenericTensorNetworks, Graphs"
+)
+
+
+@functools.cache
+def _julia_backend_unavailable() -> str:
+    """Return the reason the Julia backend cannot run, or "" when it can.
+
+    The binary on PATH is not the dependency. The GitHub runner image ships
+    julia without this project's packages, `using JSON3` fails inside the
+    driver, and run_mps_protocol degrades to the exact brute force at small n.
+    The test then asserted the fallback's backend name and failed for a missing
+    package rather than a code defect. Probe the packages the drivers actually
+    load.
+    """
+    if shutil.which("julia") is None:
+        return "needs the julia toolchain (JuliQAOA/GenericTensorNetworks)"
+    try:
+        probe = subprocess.run(
+            [
+                "julia",
+                f"--project={_JULIA_PROJECT}",
+                "--startup-file=no",
+                "-e",
+                f"using {_JULIA_PACKAGES}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+    except subprocess.TimeoutExpired:
+        return f"julia is installed but {_JULIA_PROJECT} did not load in 900 s"
+    if probe.returncode != 0:
+        detail = probe.stderr.strip().splitlines()
+        return (
+            f"julia is installed but the packages in {_JULIA_PROJECT} are not: "
+            f"{detail[0] if detail else 'unknown load error'}"
+        )
+    return ""
+
+
 needs_julia = pytest.mark.skipif(
-    shutil.which("julia") is None,
-    reason="needs the julia toolchain (JuliQAOA/GenericTensorNetworks)",
+    bool(_julia_backend_unavailable()),
+    reason=_julia_backend_unavailable() or "julia toolchain present",
 )
 
 
