@@ -1,7 +1,7 @@
 """D5: the Qiskit entry point E.ON runs to check our numbers independently.
 
 The challenge requires that the sponsor be able to execute and validate results
-in Qiskit. This script does that end to end with no solver licence and no
+in Qiskit. This script does that end to end with no solver license and no
 local-only dependency:
 
   1. builds a benchmark instance (planted optimum, so ground truth is known),

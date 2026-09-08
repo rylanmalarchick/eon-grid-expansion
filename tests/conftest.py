@@ -1,7 +1,7 @@
 """Shared markers.
 
 Tests that solve a Layer A model carry `@pytest.mark.requires_gurobi`. Without
-a licence they SKIP, and the skip is deliberate and named: a reviewer sees
+a license they SKIP, and the skip is deliberate and named: a reviewer sees
 "skipped (needs gurobipy...)" in the summary rather than a green run that
 quietly covered less than it appears to.
 
@@ -30,7 +30,7 @@ def pytest_collection_modifyitems(
     if GUROBI_AVAILABLE:
         return
     skip = pytest.mark.skip(
-        reason="needs gurobipy and a Gurobi licence (Layer A is a Gurobi model)"
+        reason="needs gurobipy and a Gurobi license (Layer A is a Gurobi model)"
     )
     for item in items:
         if "requires_gurobi" in item.keywords:

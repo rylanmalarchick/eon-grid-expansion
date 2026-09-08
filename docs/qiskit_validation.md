@@ -12,7 +12,7 @@ python scripts/qiskit_validation.py --shots 4096 --depth 2 \
   --out experiments/results/qiskit_validation/p2_x.json
 ```
 
-The run needs no solver licence and no package outside the public indexes. A
+The run needs no solver license and no package outside the public indexes. A
 seed generates the instance, so the run is self-contained.
 
 ## What the script does

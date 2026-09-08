@@ -1,7 +1,7 @@
 """The one-page pipeline visual required by the deliverable packet.
 
 One flow, left to right: a defensible distribution-planning model produces a
-plan; a reduced binary surrogate over that plan's neighbourhood is what any
+plan; a reduced binary surrogate over that plan's neighborhood is what any
 quantum method actually sees; three independent checkers score it; and the
 results reaggregate into a feasible plan carrying a certified optimality gap.
 
@@ -84,7 +84,7 @@ def plot_pipeline(out_stem: Path) -> Path:
     _box(
         axis, (0.255, 0.345), 0.19, 0.285,
         "Layer B — surrogate",
-        "Reduced binary QUBO over the\nplan's neighbourhood.\n"
+        "Reduced binary QUBO over the\nplan's neighborhood.\n"
         "NISQ-sized; benchmark only,\nnever 'the' problem.",
         accent=_BLUE,
     )

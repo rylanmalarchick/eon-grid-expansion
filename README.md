@@ -8,11 +8,11 @@ this repository produces every number in the proposal.
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q tests/                      # solver-dependent tests skip without a licence
+pytest -q tests/                      # solver-dependent tests skip without a license
 python scripts/qiskit_validation.py   # runs the quantum path end to end
 ```
 
-Gurobi is the only optional dependency. Without a licence the package still
+Gurobi is the only optional dependency. Without a license the package still
 installs, imports, and runs the full non-solver suite. The Layer A tests skip
 and name the reason, so the summary shows what did not run. Code that needs
 Gurobi reports a clear message instead of a stack trace.

@@ -11,11 +11,11 @@ from eon.instances.candidate_lines import generate_candidate_lines
 from eon.instances.distribution_feeders import load_distribution_feeder, slack_bus_index
 from eon.instances.scenarios import build_phase1_scenarios
 
-# Layer A is a Gurobi model, so these tests need a licence. Skipping the whole
+# Layer A is a Gurobi model, so these tests need a license. Skipping the whole
 # module is correct -- but it must be VISIBLE: a reviewer reading "N passed"
 # has to see that the solver-dependent block did not run.
 gp = pytest.importorskip(
-    "gurobipy", reason="Layer A tests need gurobipy and a Gurobi licence"
+    "gurobipy", reason="Layer A tests need gurobipy and a Gurobi license"
 )
 GRB = gp.GRB
 

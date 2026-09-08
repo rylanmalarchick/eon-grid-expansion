@@ -16,7 +16,7 @@ from eon.instances.scenarios import Scenario
 from eon.metrics.objective import ObjectiveWeights, ScenarioMetrics, aggregate_metrics
 
 # gurobipy is an optional extra: the package advertises a HiGHS fallback, and a
-# reviewer without a Gurobi licence must still be able to import and inspect the
+# reviewer without a Gurobi license must still be able to import and inspect the
 # model. Solving without it raises a clear error at the call site rather than an
 # ImportError at import time. (The 2026-06 lazy-import fix covered layer_b only,
 # so the package still failed to import in a clean environment.)
@@ -35,8 +35,8 @@ def _require_gurobi() -> None:
     if not GUROBI_AVAILABLE:
         raise ModuleNotFoundError(
             "gurobipy is required to solve the expansion model. Install the "
-            "optional extra: pip install -e '.[gurobi]' (a Gurobi licence is "
-            "needed; the size-limited licence falls back to HiGHS)."
+            "optional extra: pip install -e '.[gurobi]' (a Gurobi license is "
+            "needed; the size-limited license falls back to HiGHS)."
         )
 
 
