@@ -3,12 +3,12 @@
 Code for the E.ON track of the 2026 Global Quantum + AI Challenge. A script in
 this repository produces every number in the proposal.
 
-## Start here
+## Install and run
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q tests/                      # full suite; no solver licence needed
+pytest -q tests/                      # solver-dependent tests skip without a licence
 python scripts/qiskit_validation.py   # runs the quantum path end to end
 ```
 
@@ -55,10 +55,10 @@ number.** Full mode uses the real solve times and reproduces the proposal.
 
 ## Validate in Qiskit
 
-Read `docs/qiskit_validation.md` first. `scripts/qiskit_validation.py` builds
-the gate-level circuit, runs it on Aer, and decodes the counts into line sets.
-It then compares the resulting expectation value against the exact simulation
-engine. Agreement within sampling error shows that the exported circuit is the
+`scripts/qiskit_validation.py` builds the gate-level circuit, runs it on Aer, and
+decodes the counts into line sets. It then compares the resulting expectation
+value against the exact simulation engine. `docs/qiskit_validation.md` documents
+the layer. Agreement within sampling error shows that the exported circuit is the
 algorithm we benchmarked. The script exits non-zero when the two engines
 disagree. It also writes the OpenQASM 3 circuit next to its result.
 
